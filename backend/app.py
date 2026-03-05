@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from api.auth import router as auth_router
+from data.init_db import init_db
+
 app = FastAPI()
 
 class Transaction(BaseModel):
@@ -8,6 +11,12 @@ class Transaction(BaseModel):
     category: str
     country: str = "United States of America"
     channel: str = "Online"
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+app.include_router(auth_router)
 
 @app.get("/health")
 def health():
