@@ -2,9 +2,19 @@
 
 Credit Wise is a full-stack app that recommends the best credit card for a purchase.
 
-Current status:
-- Phase 0 complete
-- Next: seed data and move `/recommend` from hardcoded logic to DB-driven ranking
+## Roadmap
+
+Current phase: **Phase 2 (Data-driven Core)**.
+
+- Phase 0: Bootstrap repo and basic app shape.
+- Phase 1: Local MVP with hardcoded recommendation path.
+- Phase 2: Structured DB + rules engine + DB-driven `/recommend`.
+- Phase 3: Realism and explainability (caps, spend tracking, richer outputs).
+- Phase 4: Containerization and portable deployment.
+- Phase 5: First GCP deploy (backend, DB, hosted frontend).
+- Phase 6: Auth and user-specific secure access.
+- Phase 7: API Gateway (keys, quotas, versioning).
+- Phase 8: Analytics and operations (events, dashboards, alerts).
 
 ## Architecture
 
@@ -31,45 +41,6 @@ Notes:
 - Structured DB is the source of truth for recommendations.
 - Vector DB is support context for extraction and explainability, not direct truth.
 
-## Product Phases
-
-### Phase 0: Simplest Product Shape
-- Bootstrapped repo and split backend/frontend.
-- Goal: type purchase, get best card.
-
-### Phase 1: Local-only MVP
-- Built FastAPI and React flow end-to-end.
-- `/recommend` works with hardcoded rules for demo speed.
-
-### Phase 2: Data-driven Core
-- Replace hardcoded logic with DB-driven rules.
-- Add `cards` and `reward_rules`; manage schema with Alembic.
-- Goal: adding a card/rule should be data entry, not code changes.
-
-### Phase 3: Realism and Explainability
-- Add caps, spend tracking, and richer outputs.
-- Return top recommendations with rule IDs, cap remaining, warnings, and score breakdowns.
-
-### Phase 4: Containerization
-- Dockerize backend for portable runtime.
-- Goal: same image locally and in cloud.
-
-### Phase 5: First GCP Deploy
-- Deploy backend + managed DB + hosted frontend.
-- Goal: shareable public URL.
-
-### Phase 6: Auth
-- Add Firebase Auth and backend token verification.
-- Goal: secure per-user wallet and spend state.
-
-### Phase 7: API Gateway
-- Add API keys/quotas/versioned edge.
-- Goal: production-style API control.
-
-### Phase 8: Analytics and Operations
-- Add usage/event pipelines, dashboards, and alerts.
-- Goal: observability once traffic grows.
-
 ## Backend Data Model
 
 Canonical structured schema:
@@ -83,7 +54,7 @@ Design intent:
 - `reward_rules` stores earning logic (category/channel/country, multiplier, caps, priority)
 - this keeps recommendation behavior data-driven instead of hardcoded in Python
 
-## Local Setup
+## Local Setup (Backend)
 
 This project uses Conda environment `credit-wise-env` (not `.venv`).
 
@@ -103,17 +74,22 @@ pip install -r requirements.txt
 python -m alembic upgrade head
 ```
 
-4. Run backend
+4. Seed starter card data
+```bash
+python -m data.seed
+```
+
+5. Run backend
 ```bash
 uvicorn app:app --reload --port 8000
 ```
 
-5. Health check
+6. Health check
 ```bash
 curl -s http://localhost:8000/health
 ```
 
-## Migrations (Alembic)
+## Migrations
 
 Alembic is configured under `backend/`:
 - config: `backend/alembic.ini`
@@ -138,7 +114,7 @@ python -m alembic upgrade head
 Current initial migration:
 - `553a5f31132d_initial_schema.py`
 
-## API Endpoints (Current)
+## API
 
 ### `GET /health`
 Response:
@@ -147,19 +123,25 @@ Response:
 ```
 
 ### `POST /recommend`
-Current behavior is still hardcoded (temporary).  
-Target response contract for next step:
+Current behavior is DB-driven from `cards` + `reward_rules`.
+Response contract:
+- `best_card` (top ranked card object, or `null` if none)
 - `top_3` list with:
   - `card_id`
   - `card_name`
   - `score`
   - `applied_rule_ids`
   - `reasons`
-- if user has only 2 cards, return/rank 2
+- `explanations` (flat list of reasoning strings)
+- `debug.applied_rule_ids` (unique rule IDs used in ranking)
+- if `user_id` is provided and user has only 2 active cards, return/rank 2
 
-## Frontend
+### `POST /users/{user_id}/cards`
+Attach (or update) a card in a user's wallet.
 
-Frontend stack:
-- React
-- TypeScript
-- Vite
+Example:
+```bash
+curl -s -X POST http://localhost:8000/users/1/cards \
+  -H "Content-Type: application/json" \
+  -d '{"card_id":2,"nickname":"My Gold","is_active":true}'
+```

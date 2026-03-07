@@ -8,7 +8,7 @@ from data.database import Base
 from models.users import User
 from models.cards import Card
 from models.reward_rules import RewardRule
-from models.user_card import UserCard
+from models.user_cards import UserCard
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
