@@ -4,7 +4,7 @@ Credit Wise is a full-stack app that recommends the best credit card for a purch
 
 ## Roadmap
 
-Current phase: **Phase 2 (Data-driven Core)**.
+Current phase: **Phase 3 (Realism + Explainability) - Step 2 complete**.
 
 - Phase 0: Bootstrap repo and basic app shape.
 - Phase 1: Local MVP with hardcoded recommendation path.
@@ -48,46 +48,63 @@ Canonical structured schema:
 - `cards`
 - `reward_rules`
 - `user_cards`
+- `spend_tracker`
 
 Design intent:
 - `cards` stores stable card metadata (issuer, name, fees, network)
 - `reward_rules` stores earning logic (category/channel/country, multiplier, caps, priority)
+- `spend_tracker` stores user spend by rule and period (`user_id`, `rule_id`, `period_start`, `spent_amount`) so cap-aware recommendations are possible
 - this keeps recommendation behavior data-driven instead of hardcoded in Python
+
+## Product Improvement: Spend Tracking
+
+Why this matters:
+- reward programs often have monthly/quarterly/yearly caps
+- static rules can over-recommend cards after caps are already consumed
+- spend tracking enables user-specific, realistic recommendations and clearer explanations
+
+Business impact:
+- better recommendation accuracy after real usage
+- improved trust via explainable outcomes (`cap remaining`, cap warnings)
+- foundation for true Phase 3 ranking (`net value`, not just raw multiplier)
 
 ## Local Setup (Backend)
 
-This project uses Conda environment `credit-wise-env` (not `.venv`).
-
-1. Activate env
-```bash
-conda activate credit-wise-env
-```
-
-2. Install backend dependencies
+1. Install backend dependencies
 ```bash
 cd backend
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
-3. Run migrations
+2. Run migrations
 ```bash
-python -m alembic upgrade head
+python3 -m alembic upgrade head
 ```
 
-4. Seed starter card data
+3. Seed starter card data
 ```bash
-python -m data.seed
+python3 -m data.seed
 ```
 
-5. Run backend
+4. Run backend
 ```bash
-uvicorn app:app --reload --port 8000
+python3 -m uvicorn app:app --reload --port 8000
 ```
 
-6. Health check
+5. Health check
 ```bash
 curl -s http://localhost:8000/health
 ```
+
+## Local Setup (Frontend)
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open: `http://127.0.0.1:5173`
 
 ## Migrations
 
@@ -98,21 +115,22 @@ Alembic is configured under `backend/`:
 
 Run latest migration:
 ```bash
-conda activate credit-wise-env
 cd backend
-python -m alembic upgrade head
+python3 -m alembic upgrade head
 ```
 
 Create a new migration after model changes:
 ```bash
-conda activate credit-wise-env
 cd backend
-python -m alembic revision --autogenerate -m "describe change"
-python -m alembic upgrade head
+python3 -m alembic revision --autogenerate -m "describe change"
+python3 -m alembic upgrade head
 ```
 
 Current initial migration:
 - `553a5f31132d_initial_schema.py`
+
+Latest migration:
+- `30c2a2716f7c_add_spend_tracker.py`
 
 ## API
 
@@ -130,8 +148,11 @@ Response contract:
   - `card_id`
   - `card_name`
   - `score`
+  - `net_value`
   - `applied_rule_ids`
   - `reasons`
+  - `cap_remaining`
+  - `warnings`
 - `explanations` (flat list of reasoning strings)
 - `debug.applied_rule_ids` (unique rule IDs used in ranking)
 - if `user_id` is provided and user has only 2 active cards, return/rank 2
@@ -145,3 +166,20 @@ curl -s -X POST http://localhost:8000/users/1/cards \
   -H "Content-Type: application/json" \
   -d '{"card_id":2,"nickname":"My Gold","is_active":true}'
 ```
+
+### `POST /usage/log`
+Logs user spend against a reward rule and period, then returns updated cap usage context.
+
+Example:
+```bash
+curl -s -X POST http://localhost:8000/usage/log \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":1,"rule_id":2,"amount":120,"period_start":"2026-03-01"}'
+```
+
+## Next Step
+
+Phase 3 Step 3:
+- add a frontend workflow to log usage (`/usage/log`) before recommendation
+- show richer explanation blocks in UI (cap consumed, FX impact, rule match)
+- add tests for multi-period usage rollover (monthly/quarterly/yearly)

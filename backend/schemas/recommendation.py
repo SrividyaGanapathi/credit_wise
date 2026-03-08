@@ -15,8 +15,11 @@ class CardRecommendationOut(BaseModel):
     card_id: int
     card_name: str
     score: float
+    net_value: float
     applied_rule_ids: List[int]
     reasons: List[str]
+    cap_remaining: Optional[float] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class RecommendDebugOut(BaseModel):

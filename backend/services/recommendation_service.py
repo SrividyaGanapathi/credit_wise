@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Dict, List, Optional
 
 from sqlalchemy import or_
@@ -5,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from models.cards import Card
 from models.reward_rules import RewardRule
+from models.spend_tracker import SpendTracker
 from models.user_cards import UserCard
 
 
@@ -68,7 +70,11 @@ def _normalize_country(raw: str) -> str:
 
 
 def _fallback_cards(
-    db: Session, amount: float, allowed_card_ids: Optional[List[int]], limit: int
+    db: Session,
+    amount: float,
+    country: str,
+    allowed_card_ids: Optional[List[int]],
+    limit: int,
 ) -> List[Dict]:
     query = db.query(Card).filter(Card.is_active.is_(True))
     if allowed_card_ids is not None:
@@ -81,16 +87,36 @@ def _fallback_cards(
     final_limit = min(limit, len(cards))
     results = []
     for card in cards[:final_limit]:
+        fx_fee_value = 0.0
+        if country != "US" and card.fx_fee_bps > 0:
+            fx_fee_value = amount * (float(card.fx_fee_bps) / 10000.0)
+
         results.append(
             {
                 "card_id": card.id,
                 "card_name": f"{card.issuer} {card.name}",
                 "score": round(amount, 2),
+                "net_value": round(amount - fx_fee_value, 2),
                 "applied_rule_ids": [],
                 "reasons": ["Fallback base-rate recommendation (no matching reward rule)."],
+                "cap_remaining": None,
+                "warnings": (
+                    [f"Estimated FX fee impact: {card.fx_fee_bps} bps."] if fx_fee_value > 0 else []
+                ),
             }
         )
     return results
+
+
+def _period_start_for_cap(cap_period: Optional[str], today: date) -> date:
+    if cap_period == "MONTHLY":
+        return date(today.year, today.month, 1)
+    if cap_period == "QUARTERLY":
+        quarter_start_month = (((today.month - 1) // 3) * 3) + 1
+        return date(today.year, quarter_start_month, 1)
+    if cap_period == "YEARLY":
+        return date(today.year, 1, 1)
+    return today
 
 
 def recommend_cards(
@@ -136,11 +162,58 @@ def recommend_cards(
 
     rows = query.all()
     if not rows:
-        return _fallback_cards(db=db, amount=amount, allowed_card_ids=allowed_card_ids, limit=limit)
+        return _fallback_cards(
+            db=db,
+            amount=amount,
+            country=norm_country,
+            allowed_card_ids=allowed_card_ids,
+            limit=limit,
+        )
 
     best_by_card: Dict[int, Dict] = {}
     for rule, card in rows:
-        score = (amount * float(rule.multiplier)) + float(rule.flat_points or 0)
+        warnings: List[str] = []
+        cap_remaining: Optional[float] = None
+
+        eligible_amount = amount
+        base_rate_amount = 0.0
+
+        if rule.cap_amount is not None:
+            if user_id is None:
+                warnings.append("Cap usage is unknown without user_id; assumes full cap availability.")
+            else:
+                period_start = _period_start_for_cap(rule.cap_period, date.today())
+                usage = (
+                    db.query(SpendTracker)
+                    .filter(
+                        SpendTracker.user_id == user_id,
+                        SpendTracker.rule_id == rule.id,
+                        SpendTracker.period_start == period_start,
+                    )
+                    .one_or_none()
+                )
+                spent_amount = float(usage.spent_amount) if usage else 0.0
+                remaining_before = max(float(rule.cap_amount) - spent_amount, 0.0)
+                eligible_amount = min(amount, remaining_before)
+                base_rate_amount = amount - eligible_amount
+                cap_remaining = round(max(remaining_before - eligible_amount, 0.0), 2)
+
+                if remaining_before <= 0:
+                    warnings.append("Reward cap exhausted for this period; applying base rate only.")
+                elif eligible_amount < amount:
+                    warnings.append("Only part of the transaction qualifies for bonus due to cap limits.")
+
+        gross_score = (
+            (eligible_amount * float(rule.multiplier))
+            + (base_rate_amount * 1.0)
+            + float(rule.flat_points or 0)
+        )
+        fx_fee_value = 0.0
+        if norm_country != "US" and card.fx_fee_bps > 0:
+            fx_fee_value = amount * (float(card.fx_fee_bps) / 10000.0)
+            warnings.append(f"Estimated FX fee impact: {card.fx_fee_bps} bps.")
+
+        net_value = gross_score - fx_fee_value
         reason = f"{rule.multiplier}x on {rule.category}"
         if rule.cap_amount:
             reason = f"{reason} (cap {rule.cap_amount:g}/{rule.cap_period})"
@@ -149,9 +222,12 @@ def recommend_cards(
         candidate = {
             "card_id": card.id,
             "card_name": f"{card.issuer} {card.name}",
-            "score": round(score, 2),
+            "score": round(gross_score, 2),
+            "net_value": round(net_value, 2),
             "applied_rule_ids": [rule.id],
             "reasons": [reason],
+            "cap_remaining": cap_remaining,
+            "warnings": warnings,
             "_priority": rule.priority,
         }
 
@@ -159,12 +235,15 @@ def recommend_cards(
             best_by_card[card.id] = candidate
             continue
 
-        if candidate["score"] > current["score"]:
+        if candidate["net_value"] > current["net_value"]:
             best_by_card[card.id] = candidate
-        elif candidate["score"] == current["score"] and candidate["_priority"] < current["_priority"]:
+        elif (
+            candidate["net_value"] == current["net_value"]
+            and candidate["_priority"] < current["_priority"]
+        ):
             best_by_card[card.id] = candidate
 
-    ranked = sorted(best_by_card.values(), key=lambda x: (-x["score"], x["_priority"], x["card_id"]))
+    ranked = sorted(best_by_card.values(), key=lambda x: (-x["net_value"], x["_priority"], x["card_id"]))
     final_limit = min(limit, len(ranked))
 
     results = []

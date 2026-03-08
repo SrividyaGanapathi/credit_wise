@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from api.auth import router as auth_router
 from api.recommendations import router as recommend_router
+from api.usage import router as usage_router
 from api.users import router as users_router
 from data.init_db import init_db
 
@@ -14,6 +15,7 @@ def on_startup():
 
 app.include_router(auth_router)
 app.include_router(recommend_router)
+app.include_router(usage_router)
 app.include_router(users_router)
 
 @app.get("/health")

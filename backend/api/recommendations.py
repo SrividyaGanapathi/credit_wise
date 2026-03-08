@@ -23,7 +23,14 @@ def recommend(txn: TransactionIn, db: Session = Depends(get_db)) -> RecommendRes
     explanations = []
     applied_rule_ids = []
     for card in top_cards:
-        explanations.extend(card["reasons"])
+        reasons = ", ".join(card["reasons"]) if card["reasons"] else "No rule reason available"
+        explanations.append(
+            f"{card['card_name']}: net={card['net_value']}, score={card['score']}. {reasons}"
+        )
+        if card.get("cap_remaining") is not None:
+            explanations.append(f"{card['card_name']}: cap remaining {card['cap_remaining']}.")
+        for warning in card.get("warnings", []):
+            explanations.append(f"{card['card_name']}: {warning}")
         applied_rule_ids.extend(card["applied_rule_ids"])
 
     return RecommendResponse(
