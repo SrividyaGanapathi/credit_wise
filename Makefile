@@ -1,4 +1,4 @@
-.PHONY: install migrate seed run test
+.PHONY: install migrate seed run test docker-up docker-down docker-logs
 
 BACKEND_DIR ?= backend
 PYTHON ?= python3
@@ -18,3 +18,12 @@ run:
 
 test:
 	cd $(BACKEND_DIR) && $(PYTHON) -m pytest -q
+
+docker-up:
+	docker compose up --build
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f backend db frontend

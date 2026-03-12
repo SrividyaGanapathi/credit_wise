@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 type Recommendation = {
   card_id: number
   card_name: string
@@ -63,7 +65,7 @@ function App() {
     if (userId.trim()) payload.user_id = Number(userId)
 
     try {
-      const response = await fetch('/recommend', {
+      const response = await fetch(`${API_BASE_URL}/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -100,7 +102,7 @@ function App() {
     if (usagePeriodStart.trim()) payload.period_start = usagePeriodStart
 
     try {
-      const response = await fetch('/usage/log', {
+      const response = await fetch(`${API_BASE_URL}/usage/log`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

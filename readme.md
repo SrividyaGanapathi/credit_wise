@@ -4,7 +4,7 @@ Credit Wise is a full-stack app that recommends the best credit card for a purch
 
 ## Roadmap
 
-Current phase: **Phase 3 (Realism + Explainability) - Step 2 complete**.
+Current phase: **Phase 4 (Containerization) - in progress**.
 
 - Phase 0: Bootstrap repo and basic app shape.
 - Phase 1: Local MVP with hardcoded recommendation path.
@@ -106,6 +106,24 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Open: `http://127.0.0.1:5173`
 
+## Docker Setup (Backend + Postgres)
+
+At repo root:
+
+```bash
+docker compose up --build
+```
+
+Services:
+- backend: `http://localhost:8000`
+- frontend: `http://localhost:5173`
+- postgres: `localhost:5432` (`postgres/postgres`, db `cardwise`)
+
+Stop:
+```bash
+docker compose down
+```
+
 ## Migrations
 
 Alembic is configured under `backend/`:
@@ -179,7 +197,7 @@ curl -s -X POST http://localhost:8000/usage/log \
 
 ## Next Step
 
-Phase 3 Step 3:
-- add a frontend workflow to log usage (`/usage/log`) before recommendation
-- show richer explanation blocks in UI (cap consumed, FX impact, rule match)
-- add tests for multi-period usage rollover (monthly/quarterly/yearly)
+Phase 4:
+- add frontend container + compose profile for full-stack one-command start
+- add CI workflow for backend tests + frontend build
+- prepare Cloud Run deployment manifests/env config

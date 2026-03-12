@@ -1,15 +1,20 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DB_URL = "sqlite:///./cardwise.db"
+DB_URL = os.getenv("DATABASE_URL", "sqlite:///./cardwise.db")
+
+engine_kwargs = {}
+if DB_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
 
 engine = create_engine(
     DB_URL,
-    connect_args={"check_same_thread": False},
+    **engine_kwargs,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
-
