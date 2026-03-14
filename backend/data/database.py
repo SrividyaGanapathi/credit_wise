@@ -1,9 +1,9 @@
-import os
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DB_URL = os.getenv("DATABASE_URL", "sqlite:///./cardwise.db")
+from config import settings
+
+DB_URL = settings.database_url
 
 engine_kwargs = {}
 if DB_URL.startswith("sqlite"):

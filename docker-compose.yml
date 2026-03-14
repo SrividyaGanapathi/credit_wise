@@ -18,6 +18,7 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/cardwise
+      APP_AUTO_INIT_DB: "false"
     ports:
       - "8000:8000"
     depends_on:

@@ -70,6 +70,11 @@ Business impact:
 
 ## Local Setup (Backend)
 
+Optional: copy env defaults first
+```bash
+cp .env.example .env
+```
+
 1. Install backend dependencies
 ```bash
 cd backend
@@ -106,6 +111,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Open: `http://127.0.0.1:5173`
 
+Frontend dev proxy can be changed with `VITE_API_PROXY_TARGET`.
+
 ## Docker Setup (Backend + Postgres)
 
 At repo root:
@@ -123,6 +130,17 @@ Stop:
 ```bash
 docker compose down
 ```
+
+## Environment Variables
+
+Shared defaults are documented in [`.env.example`](/Users/sri/Downloads/credit_wise/.env.example).
+
+Key values:
+- `DATABASE_URL`: backend database connection string
+- `APP_AUTO_INIT_DB`: if `true`, FastAPI startup runs `create_all`; keep this `false` in migrated container environments
+- `PORT`: backend listen port for container/cloud runtimes
+- `VITE_API_BASE_URL`: frontend build-time API base URL
+- `VITE_API_PROXY_TARGET`: frontend dev-server proxy target
 
 ## Migrations
 
@@ -198,6 +216,5 @@ curl -s -X POST http://localhost:8000/usage/log \
 ## Next Step
 
 Phase 4:
-- add frontend container + compose profile for full-stack one-command start
 - add CI workflow for backend tests + frontend build
 - prepare Cloud Run deployment manifests/env config
