@@ -4,6 +4,10 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .vscode/
+.env
+.firebaserc
 backend/cardwise.db
 frontend/node_modules/
 frontend/dist/
+google-cloud-sdk/
+google-cloud-cli-darwin-*.tar.gz

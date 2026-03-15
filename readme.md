@@ -1,10 +1,11 @@
 # Credit Wise
 
 Credit Wise is a full-stack app that recommends the best credit card for a purchase.
+It is now data-driven, containerized, and deployed on Google Cloud.
 
 ## Roadmap
 
-Current phase: **Phase 4 (Containerization) - in progress**.
+Current phase: **Phase 5 (First GCP deploy) - backend complete, frontend hosting next**.
 
 - Phase 0: Bootstrap repo and basic app shape.
 - Phase 1: Local MVP with hardcoded recommendation path.
@@ -15,6 +16,28 @@ Current phase: **Phase 4 (Containerization) - in progress**.
 - Phase 6: Auth and user-specific secure access.
 - Phase 7: API Gateway (keys, quotas, versioning).
 - Phase 8: Analytics and operations (events, dashboards, alerts).
+
+## Current Status
+
+Implemented:
+
+- DB-driven recommendations from `cards` and `reward_rules`
+- spend tracking and cap-aware ranking
+- Dockerized backend and frontend
+- Postgres via Docker Compose for local development
+- Cloud SQL + Cloud Run production backend
+- GitHub Actions CI for backend tests and frontend build
+
+Current production backend:
+
+- Cloud Run URL: `https://credit-wise-backend-329719459408.us-central1.run.app`
+- Health check: passing
+- Cloud SQL catalog: seeded
+
+Next:
+
+- deploy frontend to Firebase Hosting
+- add real auth when public multi-user access is needed
 
 ## Architecture
 
@@ -28,18 +51,18 @@ Current phase: **Phase 4 (Containerization) - in progress**.
                            | Recommendation Service      |
                            | (rule match + scoring)      |
                            +-----------------------------+
-                               |                   |
-                               v                   v
-                 +-------------------------+   +--------------------------+
-                 | Structured DB           |   | Unstructured Vector DB   |
-                 | cards, reward_rules,    |   | PDF/HTML chunks +        |
-                 | users, user_cards       |   | embeddings (future phase)|
-                 +-------------------------+   +--------------------------+
+                                         |
+                                         v
+                         +----------------------------------+
+                         | PostgreSQL                       |
+                         | cards, reward_rules, users,      |
+                         | user_cards, spend_tracker        |
+                         +----------------------------------+
 ```
 
 Notes:
 - Structured DB is the source of truth for recommendations.
-- Vector DB is support context for extraction and explainability, not direct truth.
+- production backend runs on Cloud Run and connects to Cloud SQL.
 
 ## Backend Data Model
 
@@ -56,47 +79,42 @@ Design intent:
 - `spend_tracker` stores user spend by rule and period (`user_id`, `rule_id`, `period_start`, `spent_amount`) so cap-aware recommendations are possible
 - this keeps recommendation behavior data-driven instead of hardcoded in Python
 
-## Product Improvement: Spend Tracking
-
-Why this matters:
-- reward programs often have monthly/quarterly/yearly caps
-- static rules can over-recommend cards after caps are already consumed
-- spend tracking enables user-specific, realistic recommendations and clearer explanations
-
-Business impact:
-- better recommendation accuracy after real usage
-- improved trust via explainable outcomes (`cap remaining`, cap warnings)
-- foundation for true Phase 3 ranking (`net value`, not just raw multiplier)
-
 ## Local Setup (Backend)
 
-Optional: copy env defaults first
+Canonical local backend path is Postgres + Alembic.
+
+1. Start Postgres
+```bash
+docker compose up -d db
+```
+
+2. Optional: copy env defaults
 ```bash
 cp .env.example .env
 ```
 
-1. Install backend dependencies
+3. Install backend dependencies
 ```bash
 cd backend
 python3 -m pip install -r requirements.txt
 ```
 
-2. Run migrations
+4. Run migrations
 ```bash
 python3 -m alembic upgrade head
 ```
 
-3. Seed starter card data
+5. Seed starter card data
 ```bash
 python3 -m data.seed
 ```
 
-4. Run backend
+6. Run backend
 ```bash
 python3 -m uvicorn app:app --reload --port 8000
 ```
 
-5. Health check
+7. Health check
 ```bash
 curl -s http://localhost:8000/health
 ```
@@ -137,10 +155,12 @@ Shared defaults are documented in [`.env.example`](/Users/sri/Downloads/credit_w
 
 Key values:
 - `DATABASE_URL`: backend database connection string
-- `APP_AUTO_INIT_DB`: if `true`, FastAPI startup runs `create_all`; keep this `false` in migrated container environments
+- `APP_HOST`: backend bind host
 - `PORT`: backend listen port for container/cloud runtimes
+- `APP_PORT`: local backend port fallback
 - `VITE_API_BASE_URL`: frontend build-time API base URL
 - `VITE_API_PROXY_TARGET`: frontend dev-server proxy target
+- `RUN_SEED_ON_STARTUP`: optional one-time startup seed flag, intended for controlled initialization only
 
 ## Migrations
 
@@ -213,8 +233,73 @@ curl -s -X POST http://localhost:8000/usage/log \
   -d '{"user_id":1,"rule_id":2,"amount":120,"period_start":"2026-03-01"}'
 ```
 
-## Next Step
+## Cloud Run Backend Deploy
 
-Phase 4:
-- add CI workflow for backend tests + frontend build
-- prepare Cloud Run deployment manifests/env config
+This repo is now prepared for backend-only Cloud Run deployment. The backend container:
+- uses `PORT` from the environment
+- runs Alembic migrations on startup
+- optionally seeds reference data when `RUN_SEED_ON_STARTUP=true`
+- reads `DATABASE_URL` from env
+
+Typical deployment flow:
+
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com
+gcloud auth application-default login
+```
+
+Create Artifact Registry once:
+
+```bash
+gcloud artifacts repositories create credit-wise \
+  --repository-format=docker \
+  --location=us-central1
+```
+
+Build and deploy from repo root with env vars:
+
+```bash
+export GCP_PROJECT_ID=YOUR_PROJECT_ID
+export GCP_REGION=us-central1
+export AR_REPO=credit-wise
+export CLOUD_RUN_SERVICE=credit-wise-backend
+export CLOUD_SQL_CONNECTION_NAME=YOUR_PROJECT_ID:us-central1:YOUR_SQL_INSTANCE
+export DATABASE_URL='postgresql+psycopg2://USER:PASSWORD@/cardwise?host=/cloudsql/YOUR_PROJECT_ID:us-central1:YOUR_SQL_INSTANCE'
+
+./scripts/deploy_backend_gcp.sh
+```
+
+Notes:
+- for Cloud Run, point `DATABASE_URL` at Cloud SQL Postgres or another reachable Postgres instance
+- if the password contains `@` or similar reserved characters, URL-encode it
+- only set `RUN_SEED_ON_STARTUP=true` for a controlled one-time seed deploy
+- current production backend URL is `https://credit-wise-backend-329719459408.us-central1.run.app`
+
+## Firebase Hosting Deploy
+
+Set the frontend API base URL to the Cloud Run service URL and build:
+
+```bash
+export VITE_API_BASE_URL=https://YOUR_CLOUD_RUN_URL
+./scripts/build_frontend_firebase.sh
+```
+
+Then initialize your local Firebase project mapping once:
+
+```bash
+cp .firebaserc.example .firebaserc
+```
+
+Deploy:
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase deploy --only hosting
+```
+
+## Additional Docs
+
+- Google Cloud deployment runbook: [docs/deployment.md](/Users/sri/Downloads/credit_wise/docs/deployment.md)

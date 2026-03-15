@@ -1,0 +1,12 @@
+.git
+.gitignore
+.github/
+.pytest_cache/
+.vscode/
+__pycache__/
+*.py[cod]
+backend/cardwise.db
+frontend/
+node_modules/
+dist/
+.DS_Store

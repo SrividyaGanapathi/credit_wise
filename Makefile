@@ -1,4 +1,4 @@
-.PHONY: install migrate seed run test docker-up docker-down docker-logs
+.PHONY: install migrate seed run test frontend-build docker-up docker-down docker-logs gcp-backend-deploy firebase-build
 
 BACKEND_DIR ?= backend
 PYTHON ?= python3
@@ -18,6 +18,15 @@ run:
 
 test:
 	cd $(BACKEND_DIR) && $(PYTHON) -m pytest -q
+
+frontend-build:
+	cd frontend && npm ci && npm run build
+
+gcp-backend-deploy:
+	./scripts/deploy_backend_gcp.sh
+
+firebase-build:
+	./scripts/build_frontend_firebase.sh
 
 docker-up:
 	docker compose up --build
