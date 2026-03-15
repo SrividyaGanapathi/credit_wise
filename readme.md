@@ -5,7 +5,7 @@ It is now data-driven, containerized, and deployed on Google Cloud.
 
 ## Roadmap
 
-Current phase: **Phase 5 (First GCP deploy) - backend complete, frontend hosting next**.
+Current phase: **Phase 5 complete; Phase 6 (auth) is next**.
 
 - Phase 0: Bootstrap repo and basic app shape.
 - Phase 1: Local MVP with hardcoded recommendation path.
@@ -34,34 +34,46 @@ Current production backend:
 - Health check: passing
 - Cloud SQL catalog: seeded
 
+Current production frontend:
+
+- Firebase Hosting URL: `https://card-wise-app.web.app`
+
 Next:
 
-- deploy frontend to Firebase Hosting
 - add real auth when public multi-user access is needed
+- connect frontend login state to backend user-specific data
 
 ## Architecture
 
 ```text
-+---------------------+         +------------------------+
-|  React + Vite UI    | <-----> |  FastAPI Backend API   |
-+---------------------+         +------------------------+
-                                         |
-                                         v
-                           +-----------------------------+
-                           | Recommendation Service      |
-                           | (rule match + scoring)      |
-                           +-----------------------------+
-                                         |
-                                         v
-                         +----------------------------------+
-                         | PostgreSQL                       |
-                         | cards, reward_rules, users,      |
-                         | user_cards, spend_tracker        |
-                         +----------------------------------+
++--------------------------+
+| Firebase Hosting         |
+| serves React + Vite UI   |
++--------------------------+
+             |
+             v
++--------------------------+         +-----------------------------+
+| React Frontend           | <-----> | FastAPI on Cloud Run        |
+| uses deployed API URL    |         | recommendation API          |
++--------------------------+         +-----------------------------+
+                                                  |
+                                                  v
+                                   +-----------------------------+
+                                   | Recommendation Service      |
+                                   | rule match + scoring        |
+                                   +-----------------------------+
+                                                  |
+                                                  v
+                                   +-----------------------------+
+                                   | Cloud SQL Postgres          |
+                                   | cards, reward_rules, users, |
+                                   | user_cards, spend_tracker   |
+                                   +-----------------------------+
 ```
 
 Notes:
 - Structured DB is the source of truth for recommendations.
+- production frontend runs on Firebase Hosting.
 - production backend runs on Cloud Run and connects to Cloud SQL.
 
 ## Backend Data Model
@@ -299,6 +311,10 @@ npm install -g firebase-tools
 firebase login
 firebase deploy --only hosting
 ```
+
+Current production frontend URL:
+
+`https://card-wise-app.web.app`
 
 ## Additional Docs
 

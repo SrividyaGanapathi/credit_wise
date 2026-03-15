@@ -6,6 +6,10 @@ __pycache__/
 .vscode/
 .env
 .firebaserc
+.firebase/
+.firebase-config/
+firebase-debug.log
+frontend/firebase-debug.log
 backend/cardwise.db
 frontend/node_modules/
 frontend/dist/
