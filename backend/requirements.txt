@@ -4,5 +4,6 @@ sqlalchemy
 alembic
 pydantic
 psycopg2-binary
+firebase-admin
 pytest
 httpx

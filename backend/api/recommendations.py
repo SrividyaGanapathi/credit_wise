@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from auth.firebase_auth import AuthenticatedUser, get_current_user_optional
 from data.session import get_db
 from schemas.recommendation import RecommendDebugOut, RecommendResponse, TransactionIn
 from services.recommendation_service import recommend_cards
@@ -9,14 +10,19 @@ router = APIRouter(tags=["recommend"])
 
 
 @router.post("/recommend", response_model=RecommendResponse)
-def recommend(txn: TransactionIn, db: Session = Depends(get_db)) -> RecommendResponse:
+def recommend(
+    txn: TransactionIn,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser | None = Depends(get_current_user_optional),
+) -> RecommendResponse:
+    resolved_user_id = current_user.id if current_user is not None else txn.user_id
     top_cards = recommend_cards(
         db=db,
         amount=txn.amount,
         category=txn.category,
         channel=txn.channel,
         country=txn.country,
-        user_id=txn.user_id,
+        user_id=resolved_user_id,
         limit=3,
     )
     best_card = top_cards[0] if top_cards else None

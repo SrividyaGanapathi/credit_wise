@@ -1,21 +1,14 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from data.session import get_db
-from models.users import User
+
+from auth.firebase_auth import AuthenticatedUser, get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-class LoginRequest(BaseModel):
-    email: str
 
-@router.post("/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).one_or_none()
-    if not user:
-        user = User(email=payload.email)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return {"message": f"Logged in as {user.id} - {user.email}"}
-
+@router.get("/me")
+def get_me(current_user: AuthenticatedUser = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "firebase_uid": current_user.firebase_uid,
+    }

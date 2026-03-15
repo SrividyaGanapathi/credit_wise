@@ -25,7 +25,7 @@ def test_recommend_picks_highest_scoring_card(client, seeded_data):
     assert len(payload["explanations"]) > 0
 
 
-def test_recommend_respects_user_wallet_filter(client, seeded_data):
+def test_recommend_respects_user_wallet_filter(client, seeded_data, auth_headers):
     response = client.post(
         "/recommend",
         json={
@@ -33,8 +33,8 @@ def test_recommend_respects_user_wallet_filter(client, seeded_data):
             "category": "dining",
             "channel": "online",
             "country": "US",
-            "user_id": seeded_data["user_id"],
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -43,31 +43,48 @@ def test_recommend_respects_user_wallet_filter(client, seeded_data):
     assert len(payload["top_3"]) == 1
 
 
-def test_auth_login_is_idempotent(client):
-    first = client.post("/auth/login", json={"email": "repeat@example.com"})
-    second = client.post("/auth/login", json={"email": "repeat@example.com"})
+def test_auth_me_returns_provisioned_user(client, auth_headers):
+    response = client.get("/auth/me", headers=auth_headers)
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["message"] == second.json()["message"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email"] == "user@example.com"
+    assert body["firebase_uid"] == "firebase-user-123"
 
 
-def test_usage_log_creates_and_accumulates_spend(client, seeded_data):
+def test_add_card_to_authenticated_user(client, seeded_data, auth_headers):
+    response = client.post(
+        "/users/me/cards",
+        json={
+            "card_id": seeded_data["top_card_id"],
+            "nickname": "Dining Favorite",
+            "is_active": True,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_id"] == seeded_data["user_id"]
+    assert body["card_id"] == seeded_data["top_card_id"]
+    assert body["nickname"] == "Dining Favorite"
+
+
+def test_usage_log_creates_and_accumulates_spend(client, seeded_data, auth_headers):
     payload = {
-        "user_id": seeded_data["user_id"],
         "rule_id": seeded_data["base_dining_rule_id"],
         "amount": 120,
         "period_start": "2026-03-01",
     }
 
-    first = client.post("/usage/log", json=payload)
+    first = client.post("/usage/log", json=payload, headers=auth_headers)
     assert first.status_code == 200
     first_body = first.json()
     assert first_body["spent_amount"] == 120.0
     assert first_body["cap_amount"] == 500.0
     assert first_body["cap_remaining"] == 380.0
 
-    second = client.post("/usage/log", json={**payload, "amount": 50})
+    second = client.post("/usage/log", json={**payload, "amount": 50}, headers=auth_headers)
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["id"] == first_body["id"]
@@ -75,14 +92,14 @@ def test_usage_log_creates_and_accumulates_spend(client, seeded_data):
     assert second_body["cap_remaining"] == 330.0
 
 
-def test_recommend_applies_cap_exhaustion_for_user_usage(client, seeded_data):
+def test_recommend_applies_cap_exhaustion_for_user_usage(client, seeded_data, auth_headers):
     usage = client.post(
         "/usage/log",
         json={
-            "user_id": seeded_data["user_id"],
             "rule_id": seeded_data["base_dining_rule_id"],
             "amount": 500,
         },
+        headers=auth_headers,
     )
     assert usage.status_code == 200
     assert usage.json()["cap_remaining"] == 0.0
@@ -94,8 +111,8 @@ def test_recommend_applies_cap_exhaustion_for_user_usage(client, seeded_data):
             "category": "dining",
             "channel": "online",
             "country": "US",
-            "user_id": seeded_data["user_id"],
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -107,7 +124,7 @@ def test_recommend_applies_cap_exhaustion_for_user_usage(client, seeded_data):
     assert any("exhausted" in warning.lower() for warning in payload["best_card"]["warnings"])
 
 
-def test_recommend_applies_fx_fee_to_net_value(client, seeded_data):
+def test_recommend_applies_fx_fee_to_net_value(client, seeded_data, auth_headers):
     response = client.post(
         "/recommend",
         json={
@@ -115,8 +132,8 @@ def test_recommend_applies_fx_fee_to_net_value(client, seeded_data):
             "category": "dining",
             "channel": "online",
             "country": "IN",
-            "user_id": seeded_data["user_id"],
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -127,14 +144,14 @@ def test_recommend_applies_fx_fee_to_net_value(client, seeded_data):
     assert any("fx fee" in warning.lower() for warning in payload["best_card"]["warnings"])
 
 
-def test_recommend_handles_partial_cap_for_user_usage(client, seeded_data):
+def test_recommend_handles_partial_cap_for_user_usage(client, seeded_data, auth_headers):
     usage = client.post(
         "/usage/log",
         json={
-            "user_id": seeded_data["user_id"],
             "rule_id": seeded_data["base_dining_rule_id"],
             "amount": 450,
         },
+        headers=auth_headers,
     )
     assert usage.status_code == 200
     assert usage.json()["cap_remaining"] == 50.0
@@ -146,8 +163,8 @@ def test_recommend_handles_partial_cap_for_user_usage(client, seeded_data):
             "category": "dining",
             "channel": "online",
             "country": "US",
-            "user_id": seeded_data["user_id"],
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200

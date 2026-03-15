@@ -1,137 +1,147 @@
 # Credit Wise
 
-Credit Wise is a full-stack app that recommends the best credit card for a purchase.
-It is now data-driven, containerized, and deployed on Google Cloud.
+Credit Wise is a full-stack credit card recommendation app. It ranks the best card for a purchase using DB-driven reward rules, tracks spend against reward caps, and explains why a card was chosen.
 
-## Roadmap
+The app is live on Google Cloud:
 
-Current phase: **Phase 5 complete; Phase 6 (auth) is next**.
+- Frontend: `https://card-wise-app.web.app`
+- Backend: `https://credit-wise-backend-329719459408.us-central1.run.app`
 
-- Phase 0: Bootstrap repo and basic app shape.
-- Phase 1: Local MVP with hardcoded recommendation path.
-- Phase 2: Structured DB + rules engine + DB-driven `/recommend`.
-- Phase 3: Realism and explainability (caps, spend tracking, richer outputs).
-- Phase 4: Containerization and portable deployment.
-- Phase 5: First GCP deploy (backend, DB, hosted frontend).
-- Phase 6: Auth and user-specific secure access.
-- Phase 7: API Gateway (keys, quotas, versioning).
-- Phase 8: Analytics and operations (events, dashboards, alerts).
+## What It Does
 
-## Current Status
+- Recommends the best card for a purchase amount, category, country, and channel
+- Uses Postgres-backed `cards` and `reward_rules` data instead of hardcoded card logic
+- Tracks spend against rule-level caps with `spend_tracker`
+- Returns explainable results with `net_value`, `applied_rule_ids`, `cap_remaining`, and warnings
+- Supports user-specific wallets and usage tracking
+- Uses Firebase Auth with Google Sign-In for authenticated user flows
 
-Implemented:
+## Current Features
 
-- DB-driven recommendations from `cards` and `reward_rules`
-- spend tracking and cap-aware ranking
-- Dockerized backend and frontend
-- Postgres via Docker Compose for local development
-- Cloud SQL + Cloud Run production backend
+- FastAPI backend with SQLAlchemy and Alembic
+- PostgreSQL locally via Docker Compose and in production via Cloud SQL
+- Recommendation engine with category, channel, and country rule matching
+- Cap-aware scoring and spend tracking
+- FX fee handling and top-3 ranked results
+- Usage logging endpoint to update cap consumption
+- Wallet management tied to the authenticated user
+- React + Vite frontend deployed on Firebase Hosting
+- Backend deployed on Cloud Run
+- CORS configured for local dev and hosted frontend origins
 - GitHub Actions CI for backend tests and frontend build
-
-Current production backend:
-
-- Cloud Run URL: `https://credit-wise-backend-329719459408.us-central1.run.app`
-- Health check: passing
-- Cloud SQL catalog: seeded
-
-Current production frontend:
-
-- Firebase Hosting URL: `https://card-wise-app.web.app`
-
-Next:
-
-- add real auth when public multi-user access is needed
-- connect frontend login state to backend user-specific data
 
 ## Architecture
 
 ```text
-+--------------------------+
-| Firebase Hosting         |
-| serves React + Vite UI   |
-+--------------------------+
-             |
-             v
-+--------------------------+         +-----------------------------+
-| React Frontend           | <-----> | FastAPI on Cloud Run        |
-| uses deployed API URL    |         | recommendation API          |
-+--------------------------+         +-----------------------------+
-                                                  |
-                                                  v
-                                   +-----------------------------+
-                                   | Recommendation Service      |
-                                   | rule match + scoring        |
-                                   +-----------------------------+
-                                                  |
-                                                  v
-                                   +-----------------------------+
-                                   | Cloud SQL Postgres          |
-                                   | cards, reward_rules, users, |
-                                   | user_cards, spend_tracker   |
-                                   +-----------------------------+
+                           End-to-end runtime architecture
+
+┌──────────────────────┐
+│ User Browser         │
+│ card-wise-app.web.app│
+└──────────┬───────────┘
+           │ loads SPA
+           v
+┌──────────────────────────────────────┐
+│ Firebase Hosting                     │
+│ React + Vite frontend                │
+│ - sign-in UI                         │
+│ - recommend form                     │
+│ - usage logging UI                   │
+│ - wallet management UI               │
+└───────┬───────────────────────┬──────┘
+        │                       │
+        │ Google sign-in        │ HTTPS API calls with bearer token
+        v                       v
+┌───────────────────┐     ┌──────────────────────────────────────────┐
+│ Firebase Auth     │     │ Cloud Run: FastAPI backend              │
+│ Google provider   │     │ Routes                                  │
+│ issues ID token   │     │ - GET /health                           │
+└─────────┬─────────┘     │ - GET /auth/me                          │
+          │ ID token      │ - POST /recommend                       │
+          └──────────────>│ - POST /usage/log                       │
+                          │ - POST /users/me/cards                  │
+                          ├──────────────────────────────────────────┤
+                          │ Backend modules                         │
+                          │ - CORS + request handling               │
+                          │ - Firebase token verification           │
+                          │ - recommendation service                │
+                          │ - spend tracking logic                  │
+                          │ - SQLAlchemy ORM                        │
+                          └──────────────────┬───────────────────────┘
+                                             │ SQL
+                                             v
+                          ┌──────────────────────────────────────────┐
+                          │ Cloud SQL Postgres                       │
+                          │ - users                                  │
+                          │ - cards                                  │
+                          │ - reward_rules                           │
+                          │ - user_cards                             │
+                          │ - spend_tracker                          │
+                          └──────────────────────────────────────────┘
 ```
 
-Notes:
-- Structured DB is the source of truth for recommendations.
-- production frontend runs on Firebase Hosting.
-- production backend runs on Cloud Run and connects to Cloud SQL.
+Request flow:
 
-## Backend Data Model
+- The browser loads the React app from Firebase Hosting.
+- Users authenticate with Firebase Auth and receive an ID token.
+- The frontend sends the ID token to FastAPI as a bearer token.
+- FastAPI verifies the token, maps it to an app user, and serves authenticated endpoints.
+- Recommendation and usage requests read and update Cloud SQL through SQLAlchemy.
 
-Canonical structured schema:
+Primary tables:
+
 - `users`
 - `cards`
 - `reward_rules`
 - `user_cards`
 - `spend_tracker`
 
-Design intent:
-- `cards` stores stable card metadata (issuer, name, fees, network)
-- `reward_rules` stores earning logic (category/channel/country, multiplier, caps, priority)
-- `spend_tracker` stores user spend by rule and period (`user_id`, `rule_id`, `period_start`, `spent_amount`) so cap-aware recommendations are possible
-- this keeps recommendation behavior data-driven instead of hardcoded in Python
+## Tech Stack
 
-## Local Setup (Backend)
+- Frontend: React, Vite, Firebase Auth
+- Backend: FastAPI, SQLAlchemy, Alembic
+- Database: PostgreSQL
+- Local infra: Docker Compose
+- Cloud: Firebase Hosting, Cloud Run, Cloud SQL, Artifact Registry
 
-Canonical local backend path is Postgres + Alembic.
+## API Snapshot
 
-1. Start Postgres
+- `GET /health` returns a simple health check
+- `GET /auth/me` verifies a Firebase bearer token and returns the current app user
+- `POST /recommend` returns `best_card`, `top_3`, `explanations`, and applied rule metadata
+- `POST /usage/log` logs spend against a rule and updates cap tracking
+- `POST /users/me/cards` adds or updates a card in the signed-in user wallet
+
+Recommendation responses include:
+
+- `net_value`
+- `applied_rule_ids`
+- `cap_remaining`
+- `warnings`
+
+## Local Development
+
+### Backend
+
+From the repo root:
+
 ```bash
 docker compose up -d db
-```
-
-2. Optional: copy env defaults
-```bash
 cp .env.example .env
-```
-
-3. Install backend dependencies
-```bash
 cd backend
 python3 -m pip install -r requirements.txt
-```
-
-4. Run migrations
-```bash
 python3 -m alembic upgrade head
-```
-
-5. Seed starter card data
-```bash
 python3 -m data.seed
-```
-
-6. Run backend
-```bash
 python3 -m uvicorn app:app --reload --port 8000
 ```
 
-7. Health check
+Health check:
+
 ```bash
 curl -s http://localhost:8000/health
 ```
 
-## Local Setup (Frontend)
+### Frontend
 
 ```bash
 cd frontend
@@ -139,138 +149,65 @@ npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open: `http://127.0.0.1:5173`
+Open `http://127.0.0.1:5173`
 
-Frontend dev proxy can be changed with `VITE_API_PROXY_TARGET`.
+## Environment
 
-## Docker Setup (Backend + Postgres)
+Key variables are documented in [`.env.example`](/Users/sri/Downloads/credit_wise/.env.example).
 
-At repo root:
+Important values:
 
-```bash
-docker compose up --build
-```
+- `DATABASE_URL`
+- `APP_HOST`
+- `PORT`
+- `APP_PORT`
+- `FIREBASE_PROJECT_ID`
+- `CORS_ALLOWED_ORIGINS`
+- `VITE_API_BASE_URL`
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_APP_ID`
+- `RUN_SEED_ON_STARTUP`
 
-Services:
-- backend: `http://localhost:8000`
-- frontend: `http://localhost:5173`
-- postgres: `localhost:5432` (`postgres/postgres`, db `cardwise`)
+`RUN_SEED_ON_STARTUP` is for controlled one-time initialization only. It should not stay enabled in normal runtime.
 
-Stop:
-```bash
-docker compose down
-```
+## Database and Migrations
 
-## Environment Variables
+Alembic lives under `backend/`.
 
-Shared defaults are documented in [`.env.example`](/Users/sri/Downloads/credit_wise/.env.example).
+Run migrations:
 
-Key values:
-- `DATABASE_URL`: backend database connection string
-- `APP_HOST`: backend bind host
-- `PORT`: backend listen port for container/cloud runtimes
-- `APP_PORT`: local backend port fallback
-- `VITE_API_BASE_URL`: frontend build-time API base URL
-- `VITE_API_PROXY_TARGET`: frontend dev-server proxy target
-- `RUN_SEED_ON_STARTUP`: optional one-time startup seed flag, intended for controlled initialization only
-
-## Migrations
-
-Alembic is configured under `backend/`:
-- config: `backend/alembic.ini`
-- environment: `backend/alembic/env.py`
-- versions: `backend/alembic/versions/`
-
-Run latest migration:
 ```bash
 cd backend
 python3 -m alembic upgrade head
 ```
 
-Create a new migration after model changes:
+Create a new migration:
+
 ```bash
 cd backend
 python3 -m alembic revision --autogenerate -m "describe change"
 python3 -m alembic upgrade head
 ```
 
-Current initial migration:
+Notable migrations:
+
 - `553a5f31132d_initial_schema.py`
-
-Latest migration:
 - `30c2a2716f7c_add_spend_tracker.py`
+- `6589d6b4e8b1_add_firebase_uid_to_users.py`
 
-## API
+## Deployment
 
-### `GET /health`
-Response:
-```json
-{"ok": true}
-```
+### Backend
 
-### `POST /recommend`
-Current behavior is DB-driven from `cards` + `reward_rules`.
-Response contract:
-- `best_card` (top ranked card object, or `null` if none)
-- `top_3` list with:
-  - `card_id`
-  - `card_name`
-  - `score`
-  - `net_value`
-  - `applied_rule_ids`
-  - `reasons`
-  - `cap_remaining`
-  - `warnings`
-- `explanations` (flat list of reasoning strings)
-- `debug.applied_rule_ids` (unique rule IDs used in ranking)
-- if `user_id` is provided and user has only 2 active cards, return/rank 2
+The backend container:
 
-### `POST /users/{user_id}/cards`
-Attach (or update) a card in a user's wallet.
-
-Example:
-```bash
-curl -s -X POST http://localhost:8000/users/1/cards \
-  -H "Content-Type: application/json" \
-  -d '{"card_id":2,"nickname":"My Gold","is_active":true}'
-```
-
-### `POST /usage/log`
-Logs user spend against a reward rule and period, then returns updated cap usage context.
-
-Example:
-```bash
-curl -s -X POST http://localhost:8000/usage/log \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":1,"rule_id":2,"amount":120,"period_start":"2026-03-01"}'
-```
-
-## Cloud Run Backend Deploy
-
-This repo is now prepared for backend-only Cloud Run deployment. The backend container:
-- uses `PORT` from the environment
-- runs Alembic migrations on startup
-- optionally seeds reference data when `RUN_SEED_ON_STARTUP=true`
 - reads `DATABASE_URL` from env
+- runs Alembic migrations on startup
+- can do a one-time seed when `RUN_SEED_ON_STARTUP=true`
 
-Typical deployment flow:
-
-```bash
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com
-gcloud auth application-default login
-```
-
-Create Artifact Registry once:
-
-```bash
-gcloud artifacts repositories create credit-wise \
-  --repository-format=docker \
-  --location=us-central1
-```
-
-Build and deploy from repo root with env vars:
+Deploy with:
 
 ```bash
 export GCP_PROJECT_ID=YOUR_PROJECT_ID
@@ -278,44 +215,41 @@ export GCP_REGION=us-central1
 export AR_REPO=credit-wise
 export CLOUD_RUN_SERVICE=credit-wise-backend
 export CLOUD_SQL_CONNECTION_NAME=YOUR_PROJECT_ID:us-central1:YOUR_SQL_INSTANCE
+export FIREBASE_PROJECT_ID=YOUR_PROJECT_ID
 export DATABASE_URL='postgresql+psycopg2://USER:PASSWORD@/cardwise?host=/cloudsql/YOUR_PROJECT_ID:us-central1:YOUR_SQL_INSTANCE'
 
 ./scripts/deploy_backend_gcp.sh
 ```
 
-Notes:
-- for Cloud Run, point `DATABASE_URL` at Cloud SQL Postgres or another reachable Postgres instance
-- if the password contains `@` or similar reserved characters, URL-encode it
-- only set `RUN_SEED_ON_STARTUP=true` for a controlled one-time seed deploy
-- current production backend URL is `https://credit-wise-backend-329719459408.us-central1.run.app`
+### Frontend
 
-## Firebase Hosting Deploy
-
-Set the frontend API base URL to the Cloud Run service URL and build:
+Build the frontend against the deployed backend:
 
 ```bash
 export VITE_API_BASE_URL=https://YOUR_CLOUD_RUN_URL
 ./scripts/build_frontend_firebase.sh
 ```
 
-Then initialize your local Firebase project mapping once:
+Then deploy with Firebase Hosting.
 
-```bash
-cp .firebaserc.example .firebaserc
-```
+## Project Status
 
-Deploy:
+Implemented:
 
-```bash
-npm install -g firebase-tools
-firebase login
-firebase deploy --only hosting
-```
+- data-driven recommendation engine
+- spend tracking and cap-aware ranking
+- explainable recommendation output
+- Dockerized local stack
+- Cloud Run + Cloud SQL production backend
+- Firebase Hosting production frontend
+- Firebase Auth-backed user flows
 
-Current production frontend URL:
+Next likely areas:
 
-`https://card-wise-app.web.app`
+- stronger integration testing against Postgres
+- richer wallet UX
+- API gateway, analytics, and ops hardening
 
 ## Additional Docs
 
-- Google Cloud deployment runbook: [docs/deployment.md](/Users/sri/Downloads/credit_wise/docs/deployment.md)
+- Deployment runbook: [docs/deployment.md](/Users/sri/Downloads/credit_wise/docs/deployment.md)

@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
+    "auth auth"
     "recommend usage"
     "result result";
   gap: 1rem;
@@ -19,10 +20,14 @@
 }
 
 .panel:nth-child(1) {
-  grid-area: recommend;
+  grid-area: auth;
 }
 
 .panel:nth-child(2) {
+  grid-area: recommend;
+}
+
+.panel:nth-child(3) {
   grid-area: usage;
 }
 
@@ -32,6 +37,19 @@
 
 .subtitle {
   color: #4d5a74;
+}
+
+.auth-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.warning {
+  color: #8b5e00;
+  font-weight: 600;
 }
 
 .form {
@@ -114,6 +132,7 @@
   .app {
     grid-template-columns: 1fr;
     grid-template-areas:
+      "auth"
       "recommend"
       "usage"
       "result";

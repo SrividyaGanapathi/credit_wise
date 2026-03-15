@@ -23,6 +23,15 @@ from models.spend_tracker import SpendTracker
 
 
 @pytest.fixture()
+def auth_headers(monkeypatch):
+    def _verify_id_token(_: str):
+        return {"uid": "firebase-user-123", "email": "user@example.com"}
+
+    monkeypatch.setattr("auth.firebase_auth.verify_id_token", _verify_id_token)
+    return {"Authorization": "Bearer fake-firebase-token"}
+
+
+@pytest.fixture()
 def test_sessionmaker():
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",

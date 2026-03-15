@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth'
 import './App.css'
+import { auth, firebaseConfigured, googleProvider } from './firebase'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -31,24 +33,98 @@ type UsageLogResponse = {
   cap_remaining?: number | null
 }
 
+type AuthMeResponse = {
+  id: number
+  email: string
+  firebase_uid: string
+}
+
 function App() {
   const [amount, setAmount] = useState('120')
   const [category, setCategory] = useState('DINING')
   const [country, setCountry] = useState('US')
   const [channel, setChannel] = useState('ONLINE')
-  const [userId, setUserId] = useState('')
 
-  const [usageUserId, setUsageUserId] = useState('')
   const [usageRuleId, setUsageRuleId] = useState('')
   const [usageAmount, setUsageAmount] = useState('')
   const [usagePeriodStart, setUsagePeriodStart] = useState('')
 
+  const [authUser, setAuthUser] = useState<User | null>(null)
+  const [backendUser, setBackendUser] = useState<AuthMeResponse | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
   const [error, setError] = useState('')
   const [usageError, setUsageError] = useState('')
   const [result, setResult] = useState<RecommendResponse | null>(null)
   const [usageResult, setUsageResult] = useState<UsageLogResponse | null>(null)
+
+  useEffect(() => {
+    if (!auth) {
+      setAuthLoading(false)
+      return
+    }
+
+    return onAuthStateChanged(auth, async (nextUser) => {
+      setAuthUser(nextUser)
+      setAuthError('')
+      if (!nextUser) {
+        setBackendUser(null)
+        setAuthLoading(false)
+        return
+      }
+
+      try {
+        const token = await nextUser.getIdToken()
+        const response = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) {
+          throw new Error(`Auth sync failed with ${response.status}`)
+        }
+        const data: AuthMeResponse = await response.json()
+        setBackendUser(data)
+      } catch (e) {
+        setAuthError(e instanceof Error ? e.message : 'Unknown auth error')
+      } finally {
+        setAuthLoading(false)
+      }
+    })
+  }, [])
+
+  async function buildAuthHeaders(): Promise<Record<string, string>> {
+    if (!authUser) {
+      return {}
+    }
+
+    const token = await authUser.getIdToken()
+    return { Authorization: `Bearer ${token}` }
+  }
+
+  async function handleSignIn() {
+    if (!auth || !googleProvider) {
+      return
+    }
+
+    setAuthError('')
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Sign-in failed')
+    }
+  }
+
+  async function handleSignOut() {
+    if (!auth) {
+      return
+    }
+
+    await signOut(auth)
+    setBackendUser(null)
+    setResult(null)
+    setUsageResult(null)
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -62,12 +138,12 @@ function App() {
       country,
       channel,
     }
-    if (userId.trim()) payload.user_id = Number(userId)
 
     try {
+      const authHeaders = await buildAuthHeaders()
       const response = await fetch(`${API_BASE_URL}/recommend`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify(payload),
       })
 
@@ -77,8 +153,7 @@ function App() {
 
       const data: RecommendResponse = await response.json()
       setResult(data)
-      if (data.best_card?.applied_rule_ids?.length && userId.trim()) {
-        setUsageUserId(userId)
+      if (data.best_card?.applied_rule_ids?.length) {
         setUsageRuleId(String(data.best_card.applied_rule_ids[0]))
       }
       setUsageAmount(amount)
@@ -95,16 +170,16 @@ function App() {
     setUsageError('')
 
     const payload: Record<string, unknown> = {
-      user_id: Number(usageUserId),
       rule_id: Number(usageRuleId),
       amount: Number(usageAmount),
     }
     if (usagePeriodStart.trim()) payload.period_start = usagePeriodStart
 
     try {
+      const authHeaders = await buildAuthHeaders()
       const response = await fetch(`${API_BASE_URL}/usage/log`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify(payload),
       })
 
@@ -123,9 +198,32 @@ function App() {
 
   return (
     <main className="app">
-      <section className="panel">
+      <section className="panel auth-panel">
         <h1>Credit Wise</h1>
         <p className="subtitle">Recommend cards with cap and FX-aware net value.</p>
+        {!firebaseConfigured ? (
+          <p className="warning">
+            Firebase Auth is not configured for this build. Add the `VITE_FIREBASE_*` env vars to enable sign-in.
+          </p>
+        ) : authLoading ? (
+          <p className="empty">Checking sign-in status...</p>
+        ) : authUser ? (
+          <div className="auth-box">
+            <p>Signed in as {authUser.email}</p>
+            {backendUser ? <p>Backend user #{backendUser.id}</p> : null}
+            <button type="button" onClick={handleSignOut}>Sign Out</button>
+          </div>
+        ) : (
+          <div className="auth-box">
+            <p>Sign in with Google to keep wallet and usage tracking user-specific.</p>
+            <button type="button" onClick={handleSignIn}>Sign In with Google</button>
+          </div>
+        )}
+        {authError ? <p className="error">{authError}</p> : null}
+      </section>
+
+      <section className="panel">
+        <h2>Recommend</h2>
         <form className="form" onSubmit={onSubmit}>
           <label>
             Amount
@@ -143,10 +241,6 @@ function App() {
             Channel
             <input value={channel} onChange={(e) => setChannel(e.target.value)} />
           </label>
-          <label>
-            User ID (recommended for cap-aware results)
-            <input value={userId} onChange={(e) => setUserId(e.target.value)} type="number" min="1" />
-          </label>
           <button type="submit" disabled={loading}>
             {loading ? 'Running...' : 'Recommend'}
           </button>
@@ -159,10 +253,6 @@ function App() {
         <p className="subtitle">Log spend to update cap tracking before recommending again.</p>
         <form className="form" onSubmit={onUsageSubmit}>
           <label>
-            User ID
-            <input value={usageUserId} onChange={(e) => setUsageUserId(e.target.value)} type="number" min="1" required />
-          </label>
-          <label>
             Rule ID
             <input value={usageRuleId} onChange={(e) => setUsageRuleId(e.target.value)} type="number" min="1" required />
           </label>
@@ -174,10 +264,13 @@ function App() {
             Period Start (optional YYYY-MM-DD)
             <input value={usagePeriodStart} onChange={(e) => setUsagePeriodStart(e.target.value)} placeholder="2026-03-01" />
           </label>
-          <button type="submit" disabled={usageLoading}>
+          <button type="submit" disabled={usageLoading || (!authUser && firebaseConfigured)}>
             {usageLoading ? 'Logging...' : 'Log Usage'}
           </button>
         </form>
+        {!authUser && firebaseConfigured ? (
+          <p className="warning">Sign in first to log usage against your own reward caps.</p>
+        ) : null}
         {usageError ? <p className="error">{usageError}</p> : null}
         {usageResult ? (
           <div className="usage-result">

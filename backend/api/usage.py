@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from auth.firebase_auth import AuthenticatedUser, get_current_user_optional
 from data.session import get_db
 from models.reward_rules import RewardRule
 from models.spend_tracker import SpendTracker
@@ -25,10 +26,18 @@ def _default_period_start(cap_period: Optional[str], today: date) -> date:
 
 
 @router.post("/log", response_model=UsageLogOut)
-def log_usage(payload: UsageLogIn, db: Session = Depends(get_db)) -> UsageLogOut:
-    user = db.query(User).filter(User.id == payload.user_id).one_or_none()
+def log_usage(
+    payload: UsageLogIn,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser | None = Depends(get_current_user_optional),
+) -> UsageLogOut:
+    resolved_user_id = current_user.id if current_user is not None else payload.user_id
+    if resolved_user_id is None:
+        raise HTTPException(status_code=400, detail="user_id is required when unauthenticated")
+
+    user = db.query(User).filter(User.id == resolved_user_id).one_or_none()
     if user is None:
-        raise HTTPException(status_code=404, detail=f"User {payload.user_id} not found")
+        raise HTTPException(status_code=404, detail=f"User {resolved_user_id} not found")
 
     rule = db.query(RewardRule).filter(RewardRule.id == payload.rule_id).one_or_none()
     if rule is None:
@@ -39,7 +48,7 @@ def log_usage(payload: UsageLogIn, db: Session = Depends(get_db)) -> UsageLogOut
     usage = (
         db.query(SpendTracker)
         .filter(
-            SpendTracker.user_id == payload.user_id,
+            SpendTracker.user_id == resolved_user_id,
             SpendTracker.rule_id == payload.rule_id,
             SpendTracker.period_start == period_start,
         )
@@ -48,7 +57,7 @@ def log_usage(payload: UsageLogIn, db: Session = Depends(get_db)) -> UsageLogOut
 
     if usage is None:
         usage = SpendTracker(
-            user_id=payload.user_id,
+            user_id=resolved_user_id,
             rule_id=payload.rule_id,
             period_start=period_start,
             spent_amount=payload.amount,

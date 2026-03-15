@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class UsageLogIn(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     rule_id: int
     amount: float = Field(..., gt=0)
     period_start: Optional[date] = None
