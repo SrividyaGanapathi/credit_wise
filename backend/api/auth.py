@@ -11,4 +11,5 @@ def get_me(current_user: AuthenticatedUser = Depends(get_current_user)):
         "id": current_user.id,
         "email": current_user.email,
         "firebase_uid": current_user.firebase_uid,
+        "is_anonymous": current_user.is_anonymous,
     }

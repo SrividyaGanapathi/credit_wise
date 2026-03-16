@@ -25,7 +25,11 @@ from models.spend_tracker import SpendTracker
 @pytest.fixture()
 def auth_headers(monkeypatch):
     def _verify_id_token(_: str):
-        return {"uid": "firebase-user-123", "email": "user@example.com"}
+        return {
+            "uid": "firebase-user-123",
+            "email": "user@example.com",
+            "firebase": {"sign_in_provider": "google.com"},
+        }
 
     monkeypatch.setattr("auth.firebase_auth.verify_id_token", _verify_id_token)
     return {"Authorization": "Bearer fake-firebase-token"}

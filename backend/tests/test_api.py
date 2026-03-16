@@ -18,8 +18,8 @@ def test_recommend_picks_highest_scoring_card(client, seeded_data):
     assert response.status_code == 200
     payload = response.json()
     assert payload["best_card"]["card_id"] == seeded_data["top_card_id"]
-    assert payload["best_card"]["score"] == 300.0
-    assert payload["best_card"]["net_value"] == 300.0
+    assert payload["best_card"]["score"] == 10.0
+    assert payload["best_card"]["net_value"] == 3.0
     assert len(payload["top_3"]) == 2
     assert payload["top_3"][0]["net_value"] >= payload["top_3"][1]["net_value"]
     assert len(payload["explanations"]) > 0
@@ -40,6 +40,7 @@ def test_recommend_respects_user_wallet_filter(client, seeded_data, auth_headers
     assert response.status_code == 200
     payload = response.json()
     assert payload["best_card"]["card_id"] == seeded_data["base_card_id"]
+    assert payload["best_card"]["net_value"] == 1.0
     assert len(payload["top_3"]) == 1
 
 
@@ -50,6 +51,47 @@ def test_auth_me_returns_provisioned_user(client, auth_headers):
     body = response.json()
     assert body["email"] == "user@example.com"
     assert body["firebase_uid"] == "firebase-user-123"
+    assert body["is_anonymous"] is False
+
+
+def test_auth_me_supports_anonymous_firebase_user(client, monkeypatch):
+    def _verify_id_token(_: str):
+        return {"uid": "anonymous-user-456", "firebase": {"sign_in_provider": "anonymous"}}
+
+    monkeypatch.setattr("auth.firebase_auth.verify_id_token", _verify_id_token)
+
+    response = client.get("/auth/me", headers={"Authorization": "Bearer anon-token"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["firebase_uid"] == "anonymous-user-456"
+    assert body["email"] == "firebase-anon-anonymous-user-456@cardwise.local"
+    assert body["is_anonymous"] is True
+
+
+def test_recommend_uses_full_catalog_for_anonymous_user(client, seeded_data, monkeypatch):
+    def _verify_id_token(_: str):
+        return {"uid": "anonymous-user-456", "firebase": {"sign_in_provider": "anonymous"}}
+
+    monkeypatch.setattr("auth.firebase_auth.verify_id_token", _verify_id_token)
+
+    response = client.post(
+        "/recommend",
+        json={
+            "amount": 50,
+            "category": "dining",
+            "channel": "online",
+            "country": "US",
+        },
+        headers={"Authorization": "Bearer anon-token"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["best_card"]["card_id"] == seeded_data["top_card_id"]
+    assert body["best_card"]["net_value"] == 1.5
+    assert body["best_card"]["score"] == 10.0
+    assert len(body["top_3"]) == 2
 
 
 def test_add_card_to_authenticated_user(client, seeded_data, auth_headers):
@@ -118,8 +160,8 @@ def test_recommend_applies_cap_exhaustion_for_user_usage(client, seeded_data, au
     assert response.status_code == 200
     payload = response.json()
     assert payload["best_card"]["card_id"] == seeded_data["base_card_id"]
-    assert payload["best_card"]["score"] == 100.0
-    assert payload["best_card"]["net_value"] == 100.0
+    assert payload["best_card"]["score"] == 10.0
+    assert payload["best_card"]["net_value"] == 1.0
     assert payload["best_card"]["cap_remaining"] == 0.0
     assert any("exhausted" in warning.lower() for warning in payload["best_card"]["warnings"])
 
@@ -139,8 +181,8 @@ def test_recommend_applies_fx_fee_to_net_value(client, seeded_data, auth_headers
     assert response.status_code == 200
     payload = response.json()
     assert payload["best_card"]["card_id"] == seeded_data["base_card_id"]
-    assert payload["best_card"]["score"] == 200.0
-    assert payload["best_card"]["net_value"] == 197.0
+    assert payload["best_card"]["score"] == 0.0
+    assert payload["best_card"]["net_value"] == -1.0
     assert any("fx fee" in warning.lower() for warning in payload["best_card"]["warnings"])
 
 
@@ -170,8 +212,8 @@ def test_recommend_handles_partial_cap_for_user_usage(client, seeded_data, auth_
     assert response.status_code == 200
     payload = response.json()
     assert payload["best_card"]["card_id"] == seeded_data["base_card_id"]
-    assert payload["best_card"]["score"] == 150.0
-    assert payload["best_card"]["net_value"] == 150.0
+    assert payload["best_card"]["score"] == 10.0
+    assert payload["best_card"]["net_value"] == 1.5
     assert payload["best_card"]["cap_remaining"] == 0.0
     assert any("part of the transaction qualifies" in w.lower() for w in payload["best_card"]["warnings"])
 

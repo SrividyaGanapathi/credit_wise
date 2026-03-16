@@ -20,6 +20,7 @@ class AuthenticatedUser:
     id: int
     email: str
     firebase_uid: str
+    is_anonymous: bool
 
 
 def _get_firebase_app():
@@ -43,14 +44,24 @@ def verify_id_token(id_token: str) -> dict[str, Any]:
         ) from exc
 
 
+def _derive_email_from_claims(claims: dict[str, Any]) -> str:
+    email = claims.get("email")
+    if email:
+        return email
+
+    firebase_uid = claims["uid"]
+    return f"firebase-anon-{firebase_uid}@cardwise.local"
+
+
+def _is_anonymous_claims(claims: dict[str, Any]) -> bool:
+    firebase_claims = claims.get("firebase", {})
+    return firebase_claims.get("sign_in_provider") == "anonymous" or "email" not in claims
+
+
 def _sync_user_from_claims(claims: dict[str, Any], db: Session) -> AuthenticatedUser:
     firebase_uid = claims["uid"]
-    email = claims.get("email")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authenticated Firebase user is missing an email address",
-        )
+    email = _derive_email_from_claims(claims)
+    is_anonymous = _is_anonymous_claims(claims)
 
     user = db.query(User).filter(User.firebase_uid == firebase_uid).one_or_none()
     if user is None:
@@ -65,7 +76,12 @@ def _sync_user_from_claims(claims: dict[str, Any], db: Session) -> Authenticated
 
     db.commit()
     db.refresh(user)
-    return AuthenticatedUser(id=user.id, email=user.email, firebase_uid=firebase_uid)
+    return AuthenticatedUser(
+        id=user.id,
+        email=user.email,
+        firebase_uid=firebase_uid,
+        is_anonymous=is_anonymous,
+    )
 
 
 def get_current_user_optional(

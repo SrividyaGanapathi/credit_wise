@@ -91,18 +91,22 @@ def _fallback_cards(
         if country != "US" and card.fx_fee_bps > 0:
             fx_fee_value = amount * (float(card.fx_fee_bps) / 10000.0)
 
+        reward_value = amount * 0.01
+        net_value = reward_value - fx_fee_value
+
         results.append(
             {
                 "card_id": card.id,
                 "card_name": f"{card.issuer} {card.name}",
-                "score": round(amount, 2),
-                "net_value": round(amount - fx_fee_value, 2),
+                "score": 0.0,
+                "net_value": round(net_value, 2),
                 "applied_rule_ids": [],
                 "reasons": ["Fallback base-rate recommendation (no matching reward rule)."],
                 "cap_remaining": None,
                 "warnings": (
                     [f"Estimated FX fee impact: {card.fx_fee_bps} bps."] if fx_fee_value > 0 else []
                 ),
+                "_ranking_value": net_value,
             }
         )
     return results
@@ -203,17 +207,18 @@ def recommend_cards(
                 elif eligible_amount < amount:
                     warnings.append("Only part of the transaction qualifies for bonus due to cap limits.")
 
-        gross_score = (
+        gross_reward_units = (
             (eligible_amount * float(rule.multiplier))
             + (base_rate_amount * 1.0)
             + float(rule.flat_points or 0)
         )
+        reward_value = gross_reward_units / 100.0
         fx_fee_value = 0.0
         if norm_country != "US" and card.fx_fee_bps > 0:
             fx_fee_value = amount * (float(card.fx_fee_bps) / 10000.0)
             warnings.append(f"Estimated FX fee impact: {card.fx_fee_bps} bps.")
 
-        net_value = gross_score - fx_fee_value
+        net_value = reward_value - fx_fee_value
         reason = f"{rule.multiplier}x on {rule.category}"
         if rule.cap_amount:
             reason = f"{reason} (cap {rule.cap_amount:g}/{rule.cap_period})"
@@ -222,32 +227,40 @@ def recommend_cards(
         candidate = {
             "card_id": card.id,
             "card_name": f"{card.issuer} {card.name}",
-            "score": round(gross_score, 2),
+            "score": 0.0,
             "net_value": round(net_value, 2),
             "applied_rule_ids": [rule.id],
             "reasons": [reason],
             "cap_remaining": cap_remaining,
             "warnings": warnings,
             "_priority": rule.priority,
+            "_ranking_value": net_value,
         }
 
         if current is None:
             best_by_card[card.id] = candidate
             continue
 
-        if candidate["net_value"] > current["net_value"]:
+        if candidate["_ranking_value"] > current["_ranking_value"]:
             best_by_card[card.id] = candidate
         elif (
-            candidate["net_value"] == current["net_value"]
+            candidate["_ranking_value"] == current["_ranking_value"]
             and candidate["_priority"] < current["_priority"]
         ):
             best_by_card[card.id] = candidate
 
-    ranked = sorted(best_by_card.values(), key=lambda x: (-x["net_value"], x["_priority"], x["card_id"]))
+    ranked = sorted(best_by_card.values(), key=lambda x: (-x["_ranking_value"], x["_priority"], x["card_id"]))
     final_limit = min(limit, len(ranked))
+
+    best_ranking_value = ranked[0]["_ranking_value"] if ranked else 0.0
 
     results = []
     for row in ranked[:final_limit]:
         row.pop("_priority", None)
+        ranking_value = row.pop("_ranking_value", 0.0)
+        if best_ranking_value > 0:
+            row["score"] = round(max(0.0, min(10.0, (ranking_value / best_ranking_value) * 10.0)), 1)
+        else:
+            row["score"] = 0.0
         results.append(row)
     return results

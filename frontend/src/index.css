@@ -1,5 +1,5 @@
 :root {
-  font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+  font-family: 'Avenir Next', 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -8,9 +8,10 @@
   -moz-osx-font-smoothing: grayscale;
   color: #101a33;
   background:
-    radial-gradient(circle at 10% 10%, #e7f0ff 0, transparent 40%),
-    radial-gradient(circle at 90% 85%, #f4ece2 0, transparent 38%),
-    #f6f8fc;
+    radial-gradient(circle at 10% 12%, rgba(161, 197, 255, 0.45) 0, transparent 32%),
+    radial-gradient(circle at 88% 16%, rgba(255, 227, 177, 0.35) 0, transparent 24%),
+    radial-gradient(circle at 80% 82%, rgba(150, 177, 255, 0.18) 0, transparent 24%),
+    linear-gradient(180deg, #eef4ff 0%, #f8fafc 48%, #f0f4fb 100%);
 }
 
 body {

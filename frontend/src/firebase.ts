@@ -14,3 +14,7 @@ const app = firebaseConfigured ? initializeApp(firebaseConfig) : null
 
 export const auth = app ? getAuth(app) : null
 export const googleProvider = app ? new GoogleAuthProvider() : null
+
+if (googleProvider) {
+  googleProvider.setCustomParameters({ prompt: 'select_account' })
+}

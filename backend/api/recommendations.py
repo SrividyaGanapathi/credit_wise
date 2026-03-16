@@ -15,7 +15,10 @@ def recommend(
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser | None = Depends(get_current_user_optional),
 ) -> RecommendResponse:
-    resolved_user_id = current_user.id if current_user is not None else txn.user_id
+    resolved_user_id = txn.user_id
+    if current_user is not None and not current_user.is_anonymous:
+        resolved_user_id = current_user.id
+
     top_cards = recommend_cards(
         db=db,
         amount=txn.amount,
@@ -31,7 +34,7 @@ def recommend(
     for card in top_cards:
         reasons = ", ".join(card["reasons"]) if card["reasons"] else "No rule reason available"
         explanations.append(
-            f"{card['card_name']}: net={card['net_value']}, score={card['score']}. {reasons}"
+            f"{card['card_name']}: estimated savings=${card['net_value']:.2f}, score={card['score']}/10. {reasons}"
         )
         if card.get("cap_remaining") is not None:
             explanations.append(f"{card['card_name']}: cap remaining {card['cap_remaining']}.")

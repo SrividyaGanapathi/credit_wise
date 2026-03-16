@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth'
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  type User,
+} from 'firebase/auth'
 import './App.css'
 import { auth, firebaseConfigured, googleProvider } from './firebase'
 
@@ -23,20 +31,24 @@ type RecommendResponse = {
   explanations: string[]
 }
 
-type UsageLogResponse = {
-  id: number
-  user_id: number
-  rule_id: number
-  period_start: string
-  spent_amount: number
-  cap_amount?: number | null
-  cap_remaining?: number | null
-}
-
 type AuthMeResponse = {
   id: number
   email: string
   firebase_uid: string
+}
+
+const categoryOptions = ['DINING', 'TRAVEL', 'GROCERY', 'GAS', 'TRANSIT', 'STREAMING', 'ONLINE_SHOPPING', 'DRUGSTORE', 'OTHER']
+const channelOptions = ['ONLINE', 'ANY', 'PORTAL', 'OTHER']
+const countryOptions = ['US', 'CA', 'UK', 'IN', 'FR', 'SG']
+type AuthMode = 'signin' | 'signup'
+
+function formatDollars(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
 }
 
 function App() {
@@ -45,20 +57,17 @@ function App() {
   const [country, setCountry] = useState('US')
   const [channel, setChannel] = useState('ONLINE')
 
-  const [usageRuleId, setUsageRuleId] = useState('')
-  const [usageAmount, setUsageAmount] = useState('')
-  const [usagePeriodStart, setUsagePeriodStart] = useState('')
-
   const [authUser, setAuthUser] = useState<User | null>(null)
   const [backendUser, setBackendUser] = useState<AuthMeResponse | null>(null)
+  const [authMode, setAuthMode] = useState<AuthMode>('signin')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [authLoading, setAuthLoading] = useState(true)
+  const [authSubmitting, setAuthSubmitting] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [usageLoading, setUsageLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [error, setError] = useState('')
-  const [usageError, setUsageError] = useState('')
   const [result, setResult] = useState<RecommendResponse | null>(null)
-  const [usageResult, setUsageResult] = useState<UsageLogResponse | null>(null)
 
   useEffect(() => {
     if (!auth) {
@@ -108,10 +117,51 @@ function App() {
     }
 
     setAuthError('')
+    setAuthSubmitting(true)
     try {
       await signInWithPopup(auth, googleProvider)
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : 'Sign-in failed')
+    } finally {
+      setAuthSubmitting(false)
+    }
+  }
+
+  async function handleEmailAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!auth) {
+      return
+    }
+
+    setAuthError('')
+    setAuthSubmitting(true)
+    try {
+      if (authMode === 'signup') {
+        await createUserWithEmailAndPassword(auth, email.trim(), password)
+      } else {
+        await signInWithEmailAndPassword(auth, email.trim(), password)
+      }
+      setPassword('')
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Email sign-in failed')
+    } finally {
+      setAuthSubmitting(false)
+    }
+  }
+
+  async function handleGuestAccess() {
+    if (!auth) {
+      return
+    }
+
+    setAuthError('')
+    setAuthSubmitting(true)
+    try {
+      await signInAnonymously(auth)
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Guest sign-in failed')
+    } finally {
+      setAuthSubmitting(false)
     }
   }
 
@@ -123,7 +173,6 @@ function App() {
     await signOut(auth)
     setBackendUser(null)
     setResult(null)
-    setUsageResult(null)
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -153,10 +202,6 @@ function App() {
 
       const data: RecommendResponse = await response.json()
       setResult(data)
-      if (data.best_card?.applied_rule_ids?.length) {
-        setUsageRuleId(String(data.best_card.applied_rule_ids[0]))
-      }
-      setUsageAmount(amount)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
     } finally {
@@ -164,178 +209,247 @@ function App() {
     }
   }
 
-  async function onUsageSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setUsageLoading(true)
-    setUsageError('')
-
-    const payload: Record<string, unknown> = {
-      rule_id: Number(usageRuleId),
-      amount: Number(usageAmount),
-    }
-    if (usagePeriodStart.trim()) payload.period_start = usagePeriodStart
-
-    try {
-      const authHeaders = await buildAuthHeaders()
-      const response = await fetch(`${API_BASE_URL}/usage/log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify(payload),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Usage log failed with ${response.status}`)
-      }
-
-      const data: UsageLogResponse = await response.json()
-      setUsageResult(data)
-    } catch (e) {
-      setUsageError(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setUsageLoading(false)
-    }
-  }
-
   return (
     <main className="app">
-      <section className="panel auth-panel">
-        <h1>Credit Wise</h1>
-        <p className="subtitle">Recommend cards with cap and FX-aware net value.</p>
-        {!firebaseConfigured ? (
-          <p className="warning">
-            Firebase Auth is not configured for this build. Add the `VITE_FIREBASE_*` env vars to enable sign-in.
+      <section className="hero panel">
+        <div className="hero-copy">
+          <p className="eyebrow">Explainable credit card recommender</p>
+          <h1>Credit Wise</h1>
+          <p className="hero-text">
+            Compare reward value and FX cost before you swipe. The engine ranks live card rules from the database and explains
+            the tradeoffs behind each pick.
           </p>
-        ) : authLoading ? (
-          <p className="empty">Checking sign-in status...</p>
-        ) : authUser ? (
-          <div className="auth-box">
-            <p>Signed in as {authUser.email}</p>
-            {backendUser ? <p>Backend user #{backendUser.id}</p> : null}
-            <button type="button" onClick={handleSignOut}>Sign Out</button>
+          <div className="hero-metrics">
+            <div className="metric-pill">
+              <span className="metric-label">Ranking model</span>
+              <strong>Savings + fit score</strong>
+            </div>
+            <div className="metric-pill">
+              <span className="metric-label">Identity</span>
+              <strong>{authUser ? 'Firebase-backed wallet' : 'Guest recommend mode'}</strong>
+            </div>
+            <div className="metric-pill">
+              <span className="metric-label">Outputs</span>
+              <strong>Top 3 + rule reasons</strong>
+            </div>
           </div>
-        ) : (
-          <div className="auth-box">
-            <p>Sign in with Google to keep wallet and usage tracking user-specific.</p>
-            <button type="button" onClick={handleSignIn}>Sign In with Google</button>
-          </div>
-        )}
-        {authError ? <p className="error">{authError}</p> : null}
+        </div>
+
+        <div className="auth-card">
+          {!firebaseConfigured ? (
+            <>
+              <p className="auth-kicker">Authentication unavailable</p>
+              <p className="warning">
+                Firebase Auth is not configured for this build. Add the `VITE_FIREBASE_*` env vars to enable sign-in.
+              </p>
+            </>
+          ) : authLoading ? (
+            <>
+              <p className="auth-kicker">Checking session</p>
+              <p className="empty">Loading your sign-in state...</p>
+            </>
+          ) : authUser ? (
+            <>
+              <p className="auth-kicker">Wallet session</p>
+              <div className="identity-block">
+                <p className="identity-email">{authUser.isAnonymous ? 'Guest session' : authUser.email}</p>
+                <div className="identity-meta">
+                  <span className="status-badge success">
+                    {authUser.isAnonymous ? 'Anonymous access' : authUser.providerData[0]?.providerId === 'password' ? 'Email account' : 'Google connected'}
+                  </span>
+                  {backendUser ? <span className="status-badge">Backend user #{backendUser.id}</span> : null}
+                </div>
+              </div>
+              <p className="auth-copy">
+                {authUser.isAnonymous
+                  ? 'You can explore the recommender in guest mode and link to email or Google later if you want a persistent account.'
+                  : 'Signed-in sessions let you keep a persistent identity as we expand wallet features.'}
+              </p>
+              <button className="ghost-button" type="button" onClick={handleSignOut}>Sign Out</button>
+            </>
+          ) : (
+            <>
+              <p className="auth-kicker">Personalize results</p>
+              <p className="auth-copy">Choose a fast sign-in path. Google is quickest, email/password works as a normal account, and guest mode is low-friction for demos.</p>
+              <div className="auth-actions">
+                <button className="google-button" type="button" onClick={handleSignIn} disabled={authSubmitting}>Sign In with Google</button>
+                <button className="ghost-button secondary" type="button" onClick={handleGuestAccess} disabled={authSubmitting}>Continue as Guest</button>
+              </div>
+              <div className="auth-divider"><span>or use email</span></div>
+              <div className="auth-switch">
+                <button
+                  className={authMode === 'signin' ? 'mode-chip active' : 'mode-chip'}
+                  type="button"
+                  onClick={() => setAuthMode('signin')}
+                >
+                  Sign In
+                </button>
+                <button
+                  className={authMode === 'signup' ? 'mode-chip active' : 'mode-chip'}
+                  type="button"
+                  onClick={() => setAuthMode('signup')}
+                >
+                  Create Account
+                </button>
+              </div>
+              <form className="auth-form" onSubmit={handleEmailAuth}>
+                <label className="field field-wide">
+                  <span>Email</span>
+                  <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" required />
+                </label>
+                <label className="field field-wide">
+                  <span>Password</span>
+                  <input
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    type="password"
+                    autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                    minLength={6}
+                    required
+                  />
+                </label>
+                <button className="primary-button auth-submit" type="submit" disabled={authSubmitting}>
+                  {authSubmitting ? 'Working...' : authMode === 'signup' ? 'Create Email Account' : 'Sign In with Email'}
+                </button>
+              </form>
+            </>
+          )}
+          {authError ? <p className="error">{authError}</p> : null}
+        </div>
       </section>
 
-      <section className="panel">
-        <h2>Recommend</h2>
+      <section className="panel input-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Recommendation input</p>
+            <h2>Find the best card for a transaction</h2>
+          </div>
+          <p className="section-note">Start with a spend scenario. We’ll rank the strongest matches from the live card catalog.</p>
+        </div>
         <form className="form" onSubmit={onSubmit}>
-          <label>
-            Amount
+          <label className="field">
+            <span>Amount</span>
             <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="1" step="0.01" />
           </label>
-          <label>
-            Category
-            <input value={category} onChange={(e) => setCategory(e.target.value)} />
+          <label className="field">
+            <span>Category</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {categoryOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </label>
-          <label>
-            Country
-            <input value={country} onChange={(e) => setCountry(e.target.value)} />
+          <label className="field">
+            <span>Country</span>
+            <select value={country} onChange={(e) => setCountry(e.target.value)}>
+              {countryOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </label>
-          <label>
-            Channel
-            <input value={channel} onChange={(e) => setChannel(e.target.value)} />
+          <label className="field">
+            <span>Channel</span>
+            <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+              {channelOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </label>
-          <button type="submit" disabled={loading}>
-            {loading ? 'Running...' : 'Recommend'}
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? 'Ranking cards...' : 'Recommend Best Card'}
           </button>
         </form>
         {error ? <p className="error">{error}</p> : null}
       </section>
 
-      <section className="panel">
-        <h2>Usage Log</h2>
-        <p className="subtitle">Log spend to update cap tracking before recommending again.</p>
-        <form className="form" onSubmit={onUsageSubmit}>
-          <label>
-            Rule ID
-            <input value={usageRuleId} onChange={(e) => setUsageRuleId(e.target.value)} type="number" min="1" required />
-          </label>
-          <label>
-            Amount
-            <input value={usageAmount} onChange={(e) => setUsageAmount(e.target.value)} type="number" min="0.01" step="0.01" required />
-          </label>
-          <label>
-            Period Start (optional YYYY-MM-DD)
-            <input value={usagePeriodStart} onChange={(e) => setUsagePeriodStart(e.target.value)} placeholder="2026-03-01" />
-          </label>
-          <button type="submit" disabled={usageLoading || (!authUser && firebaseConfigured)}>
-            {usageLoading ? 'Logging...' : 'Log Usage'}
-          </button>
-        </form>
-        {!authUser && firebaseConfigured ? (
-          <p className="warning">Sign in first to log usage against your own reward caps.</p>
-        ) : null}
-        {usageError ? <p className="error">{usageError}</p> : null}
-        {usageResult ? (
-          <div className="usage-result">
-            <p>Logged: {usageResult.spent_amount.toFixed(2)}</p>
-            <p>Period: {usageResult.period_start}</p>
-            <p>
-              Cap Remaining:{' '}
-              {usageResult.cap_remaining === null || usageResult.cap_remaining === undefined
-                ? 'N/A'
-                : usageResult.cap_remaining.toFixed(2)}
-            </p>
-          </div>
-        ) : null}
-      </section>
-
       <section className="panel result-panel">
-        <h2>Recommendation Result</h2>
+        <div className="section-heading result-heading">
+          <div>
+            <p className="section-kicker">Decision output</p>
+            <h2>Recommendation Result</h2>
+          </div>
+          {result?.best_card ? <p className="section-note">Best current pick: {result.best_card.card_name}</p> : null}
+        </div>
         {!result ? (
-          <p className="empty">Submit a transaction to see recommendations.</p>
+          <div className="empty-state">
+            <p className="empty-title">No recommendation yet</p>
+            <p className="empty">Run a transaction through the engine to see ranked cards, rule matches, and warning flags.</p>
+          </div>
         ) : (
           <>
             <div className="best">
               <h3>Best Card</h3>
               {result.best_card ? (
-                <div>
-                  <p>{result.best_card.card_name}</p>
-                  <p>Net Value: {result.best_card.net_value.toFixed(2)}</p>
-                  <p>Score: {result.best_card.score.toFixed(2)}</p>
-                  <p>
-                    Cap Remaining:{' '}
-                    {result.best_card.cap_remaining === null || result.best_card.cap_remaining === undefined
-                      ? 'N/A'
-                      : result.best_card.cap_remaining.toFixed(2)}
-                  </p>
-                  <p>Primary Rule ID: {result.best_card.applied_rule_ids[0] ?? 'N/A'}</p>
+                <div className="hero-result">
+                  <div className="hero-result-head">
+                    <div>
+                      <p className="result-label">Best match</p>
+                      <h3>{result.best_card.card_name}</h3>
+                    </div>
+                    <span className="status-badge highlight brand-chip">
+                      Rule {result.best_card.applied_rule_ids[0] ?? 'N/A'}
+                    </span>
+                  </div>
+                  <div className="stat-row">
+                    <div className="stat-card">
+                      <span className="stat-label">Estimated savings</span>
+                      <strong>{formatDollars(result.best_card.net_value)}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span className="stat-label">Card score</span>
+                      <strong>{result.best_card.score.toFixed(1)}/10</strong>
+                    </div>
+                  </div>
+                  <p className="best-reason">{result.best_card.reasons.join(' · ')}</p>
+                  {result.best_card.warnings.length > 0 ? (
+                    <ul className="warning-list">
+                      {result.best_card.warnings.map((warning, index) => (
+                        <li key={`best-${index}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : (
                 <p>No card found.</p>
               )}
             </div>
-            <div className="list">
-              <h3>Top 3</h3>
-              {result.top_3.map((card) => (
-                <article key={card.card_id} className="item">
-                  <h4>{card.card_name}</h4>
-                  <p>Net Value: {card.net_value.toFixed(2)}</p>
-                  <p>Score: {card.score.toFixed(2)}</p>
-                  <p>Reason: {card.reasons.join(', ')}</p>
-                  {card.warnings.length > 0 ? (
-                    <ul>
-                      {card.warnings.map((warning, index) => (
-                        <li key={`${card.card_id}-${index}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-            <div className="explanations">
-              <h3>Explanations</h3>
-              <ul>
-                {result.explanations.map((line, index) => (
-                  <li key={index}>{line}</li>
-                ))}
-              </ul>
+            <div className="result-grid">
+              <div className="list">
+                <h3>Top 3</h3>
+                <div className="rank-list">
+                  {result.top_3.map((card, index) => (
+                    <article key={card.card_id} className="item">
+                      <div className="item-head">
+                        <span className="rank-pill">#{index + 1}</span>
+                        <div>
+                          <h4>{card.card_name}</h4>
+                          <p className="item-reason">{card.reasons.join(', ')}</p>
+                        </div>
+                      </div>
+                      <div className="item-stats">
+                        <span>Saves {formatDollars(card.net_value)}</span>
+                        <span>Score {card.score.toFixed(1)}/10</span>
+                        <span>Rule {card.applied_rule_ids[0] ?? 'N/A'}</span>
+                      </div>
+                      {card.warnings.length > 0 ? (
+                        <ul className="warning-list">
+                          {card.warnings.map((warning, warningIndex) => (
+                            <li key={`${card.card_id}-${warningIndex}`}>{warning}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+              <div className="explanations">
+                <h3>Decision Notes</h3>
+                <ul>
+                  {result.explanations.map((line, index) => (
+                    <li key={index}>{line}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </>
         )}
