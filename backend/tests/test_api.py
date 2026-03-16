@@ -44,6 +44,35 @@ def test_recommend_respects_user_wallet_filter(client, seeded_data, auth_headers
     assert len(payload["top_3"]) == 1
 
 
+def test_recommend_allows_catalog_mode_for_authenticated_user(client, seeded_data, auth_headers):
+    response = client.post(
+        "/recommend",
+        json={
+            "amount": 50,
+            "category": "dining",
+            "channel": "online",
+            "country": "US",
+            "recommendation_mode": "catalog",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["best_card"]["card_id"] == seeded_data["top_card_id"]
+    assert len(payload["top_3"]) == 2
+
+
+def test_list_cards_returns_active_catalog(client, seeded_data):
+    response = client.get("/cards")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    assert body[0]["issuer"] == "Base Bank"
+    assert body[1]["issuer"] == "Top Bank"
+
+
 def test_auth_me_returns_provisioned_user(client, auth_headers):
     response = client.get("/auth/me", headers=auth_headers)
 
@@ -52,6 +81,58 @@ def test_auth_me_returns_provisioned_user(client, auth_headers):
     assert body["email"] == "user@example.com"
     assert body["firebase_uid"] == "firebase-user-123"
     assert body["is_anonymous"] is False
+
+
+def test_list_my_cards_returns_wallet_cards(client, auth_headers, seeded_data):
+    response = client.get("/users/me/cards", headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["nickname"] == "Wallet Card"
+    assert body[0]["card_name"] == "Base Bank Base Everyday"
+
+
+def test_log_recommendation_impression_event(client, auth_headers, seeded_data):
+    response = client.post(
+        "/events/recommendation",
+        json={
+            "event_type": "impression",
+            "request_id": "req-123",
+            "auth_mode": "google",
+            "amount": 80,
+            "category": "DINING",
+            "country": "US",
+            "channel": "ONLINE",
+            "recommended_card_ids": [seeded_data["top_card_id"], seeded_data["base_card_id"]],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["event_type"] == "impression"
+    assert body["request_id"] == "req-123"
+    assert body["user_id"] == seeded_data["user_id"]
+
+
+def test_log_recommendation_selection_event_requires_selected_card(client, auth_headers):
+    response = client.post(
+        "/events/recommendation",
+        json={
+            "event_type": "selection",
+            "request_id": "req-456",
+            "auth_mode": "guest",
+            "amount": 50,
+            "category": "GROCERY",
+            "country": "US",
+            "channel": "ONLINE",
+            "recommended_card_ids": [1, 2, 3],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_auth_me_supports_anonymous_firebase_user(client, monkeypatch):

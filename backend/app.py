@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import router as auth_router
+from api.cards import router as cards_router
+from api.events import router as events_router
 from api.recommendations import router as recommend_router
 from api.usage import router as usage_router
 from api.users import router as users_router
@@ -18,6 +20,8 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(cards_router)
+app.include_router(events_router)
 app.include_router(recommend_router)
 app.include_router(usage_router)
 app.include_router(users_router)

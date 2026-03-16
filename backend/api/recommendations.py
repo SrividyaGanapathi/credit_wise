@@ -16,7 +16,8 @@ def recommend(
     current_user: AuthenticatedUser | None = Depends(get_current_user_optional),
 ) -> RecommendResponse:
     resolved_user_id = txn.user_id
-    if current_user is not None and not current_user.is_anonymous:
+    catalog_mode = (txn.recommendation_mode or "").lower() == "catalog"
+    if current_user is not None and not current_user.is_anonymous and not catalog_mode:
         resolved_user_id = current_user.id
 
     top_cards = recommend_cards(

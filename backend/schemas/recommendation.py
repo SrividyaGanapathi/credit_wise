@@ -9,6 +9,7 @@ class TransactionIn(BaseModel):
     country: str = "United States of America"
     channel: str = "Online"
     user_id: Optional[int] = None
+    recommendation_mode: Optional[str] = None
 
 
 class CardRecommendationOut(BaseModel):

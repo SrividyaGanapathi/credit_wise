@@ -35,7 +35,29 @@ type AuthMeResponse = {
   id: number
   email: string
   firebase_uid: string
+  is_anonymous: boolean
 }
+
+type CardCatalogItem = {
+  id: number
+  issuer: string
+  name: string
+  network: string
+  annual_fee: number
+  fx_fee_bps: number
+}
+
+type WalletCard = {
+  id: number
+  user_id: number
+  card_id: number
+  nickname: string
+  is_active: boolean
+  card_name: string
+  network: string
+}
+
+type RecommendationMode = 'wallet' | 'catalog'
 
 const categoryOptions = ['DINING', 'TRAVEL', 'GROCERY', 'GAS', 'TRANSIT', 'STREAMING', 'ONLINE_SHOPPING', 'DRUGSTORE', 'OTHER']
 const channelOptions = ['ONLINE', 'ANY', 'PORTAL', 'OTHER']
@@ -49,6 +71,13 @@ function formatDollars(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
+}
+
+function buildRequestId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `req-${Date.now()}`
 }
 
 function App() {
@@ -65,9 +94,18 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [authSubmitting, setAuthSubmitting] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [walletLoading, setWalletLoading] = useState(false)
+  const [walletSavingCardId, setWalletSavingCardId] = useState<number | null>(null)
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [issuerFilter, setIssuerFilter] = useState('All issuers')
+  const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>('catalog')
   const [authError, setAuthError] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<RecommendResponse | null>(null)
+  const [latestRequestId, setLatestRequestId] = useState<string | null>(null)
+  const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
+  const [walletCards, setWalletCards] = useState<WalletCard[]>([])
+  const [catalogCards, setCatalogCards] = useState<CardCatalogItem[]>([])
 
   useEffect(() => {
     if (!auth) {
@@ -80,6 +118,9 @@ function App() {
       setAuthError('')
       if (!nextUser) {
         setBackendUser(null)
+        setWalletCards([])
+        setCatalogCards([])
+        setRecommendationMode('catalog')
         setAuthLoading(false)
         return
       }
@@ -94,9 +135,32 @@ function App() {
         }
         const data: AuthMeResponse = await response.json()
         setBackendUser(data)
+
+        if (!data.is_anonymous) {
+          setRecommendationMode('wallet')
+          setWalletLoading(true)
+          const [walletResponse, cardsResponse] = await Promise.all([
+            fetch(`${API_BASE_URL}/users/me/cards`, {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            fetch(`${API_BASE_URL}/cards`),
+          ])
+          if (walletResponse.ok) {
+            const walletData: WalletCard[] = await walletResponse.json()
+            setWalletCards(walletData)
+          }
+          if (cardsResponse.ok) {
+            const cardsData: CardCatalogItem[] = await cardsResponse.json()
+            setCatalogCards(cardsData)
+          }
+        } else {
+          setWalletCards([])
+          setRecommendationMode('catalog')
+        }
       } catch (e) {
         setAuthError(e instanceof Error ? e.message : 'Unknown auth error')
       } finally {
+        setWalletLoading(false)
         setAuthLoading(false)
       }
     })
@@ -109,6 +173,36 @@ function App() {
 
     const token = await authUser.getIdToken()
     return { Authorization: `Bearer ${token}` }
+  }
+
+  function getAuthMode(): string {
+    if (!authUser) {
+      return 'unauthenticated'
+    }
+    if (authUser.isAnonymous || backendUser?.is_anonymous) {
+      return 'guest'
+    }
+    const providerId = authUser.providerData[0]?.providerId
+    if (providerId === 'password') {
+      return 'email'
+    }
+    if (providerId === 'google.com') {
+      return 'google'
+    }
+    return 'authenticated'
+  }
+
+  async function logRecommendationEvent(payload: Record<string, unknown>) {
+    try {
+      const authHeaders = await buildAuthHeaders()
+      await fetch(`${API_BASE_URL}/events/recommendation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify(payload),
+      })
+    } catch {
+      // Event logging should not block core recommendation UX.
+    }
   }
 
   async function handleSignIn() {
@@ -172,7 +266,47 @@ function App() {
 
     await signOut(auth)
     setBackendUser(null)
+    setWalletCards([])
     setResult(null)
+  }
+
+  async function refreshWallet() {
+    const authHeaders = await buildAuthHeaders()
+    const response = await fetch(`${API_BASE_URL}/users/me/cards`, {
+      headers: authHeaders,
+    })
+    if (!response.ok) {
+      throw new Error(`Wallet fetch failed with ${response.status}`)
+    }
+    const walletData: WalletCard[] = await response.json()
+    setWalletCards(walletData)
+  }
+
+  async function handleAddCard(card: CardCatalogItem) {
+    setAuthError('')
+    setWalletSavingCardId(card.id)
+    try {
+      const authHeaders = await buildAuthHeaders()
+      const response = await fetch(`${API_BASE_URL}/users/me/cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          card_id: card.id,
+          nickname: card.name,
+          is_active: true,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Add card failed with ${response.status}`)
+      }
+
+      await refreshWallet()
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Unable to add card')
+    } finally {
+      setWalletSavingCardId(null)
+    }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -180,6 +314,7 @@ function App() {
     setLoading(true)
     setError('')
     setResult(null)
+    setSelectedCardId(null)
 
     const payload: Record<string, unknown> = {
       amount: Number(amount),
@@ -193,7 +328,10 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/recommend`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          recommendation_mode: effectiveRecommendationMode,
+        }),
       })
 
       if (!response.ok) {
@@ -202,12 +340,64 @@ function App() {
 
       const data: RecommendResponse = await response.json()
       setResult(data)
+      const requestId = buildRequestId()
+      setLatestRequestId(requestId)
+      void logRecommendationEvent({
+        event_type: 'impression',
+        request_id: requestId,
+        auth_mode: getAuthMode(),
+        amount: Number(amount),
+        category,
+        country,
+        channel,
+        recommended_card_ids: data.top_3.map((card) => card.card_id),
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
   }
+
+  function handleCardSelection(card: Recommendation, rank: number) {
+    setSelectedCardId(card.card_id)
+    if (!latestRequestId) {
+      return
+    }
+
+    void logRecommendationEvent({
+      event_type: 'selection',
+      request_id: latestRequestId,
+      auth_mode: getAuthMode(),
+      amount: Number(amount),
+      category,
+      country,
+      channel,
+      recommended_card_ids: result?.top_3.map((item) => item.card_id) ?? [card.card_id],
+      selected_card_id: card.card_id,
+      selected_rank: rank,
+    })
+  }
+
+  const canUseWalletMode = Boolean(authUser && !authUser.isAnonymous && backendUser && walletCards.length > 0)
+  const effectiveRecommendationMode: RecommendationMode = canUseWalletMode && recommendationMode === 'wallet' ? 'wallet' : 'catalog'
+  const requiresWalletSetup = Boolean(authUser && !authUser.isAnonymous && backendUser && walletCards.length === 0 && recommendationMode === 'wallet')
+  const availableCatalogCards = catalogCards.filter((card) => !walletCards.some((walletCard) => walletCard.card_id === card.id))
+  const normalizedSearch = catalogSearch.trim().toLowerCase()
+  const issuerOptions = ['All issuers', ...new Set(availableCatalogCards.map((card) => card.issuer))]
+  const filteredCatalogCards = availableCatalogCards.filter((card) => {
+    const matchesSearch =
+      normalizedSearch.length === 0
+      || `${card.issuer} ${card.name} ${card.network}`.toLowerCase().includes(normalizedSearch)
+    const matchesIssuer = issuerFilter === 'All issuers' || card.issuer === issuerFilter
+    return matchesSearch && matchesIssuer
+  })
+  const groupedCatalogCards = filteredCatalogCards.reduce<Record<string, CardCatalogItem[]>>((groups, card) => {
+    const bucket = groups[card.issuer] ?? []
+    bucket.push(card)
+    groups[card.issuer] = bucket
+    return groups
+  }, {})
 
   return (
     <main className="app">
@@ -226,7 +416,7 @@ function App() {
             </div>
             <div className="metric-pill">
               <span className="metric-label">Identity</span>
-              <strong>{authUser ? 'Firebase-backed wallet' : 'Guest recommend mode'}</strong>
+              <strong>{effectiveRecommendationMode === 'wallet' ? 'Firebase-backed wallet' : 'Full catalog browse mode'}</strong>
             </div>
             <div className="metric-pill">
               <span className="metric-label">Outputs</span>
@@ -263,7 +453,7 @@ function App() {
               <p className="auth-copy">
                 {authUser.isAnonymous
                   ? 'You can explore the recommender in guest mode and link to email or Google later if you want a persistent account.'
-                  : 'Signed-in sessions let you keep a persistent identity as we expand wallet features.'}
+                  : 'Signed-in sessions keep a persistent wallet. You can recommend from your saved cards or switch to the full catalog anytime.'}
               </p>
               <button className="ghost-button" type="button" onClick={handleSignOut}>Sign Out</button>
             </>
@@ -324,8 +514,118 @@ function App() {
             <p className="section-kicker">Recommendation input</p>
             <h2>Find the best card for a transaction</h2>
           </div>
-          <p className="section-note">Start with a spend scenario. We’ll rank the strongest matches from the live card catalog.</p>
+          <p className="section-note">
+            {requiresWalletSetup
+              ? 'Add at least one card to start in wallet mode, or skip setup for now and browse the full catalog.'
+              : effectiveRecommendationMode === 'wallet'
+                ? 'Start with a spend scenario. We’ll rank the strongest match from your saved cards.'
+                : 'Start with a spend scenario. We’ll rank the strongest matches from the full card catalog.'}
+          </p>
         </div>
+        {authUser && !authUser.isAnonymous ? (
+          <div className="wallet-strip">
+            <div>
+              <p className="wallet-title">Your wallet</p>
+              <p className="wallet-copy">
+                {walletLoading
+                  ? 'Loading your saved cards...'
+                  : walletCards.length > 0
+                    ? `${walletCards.length} card${walletCards.length === 1 ? '' : 's'} ready for personalized recommendations.`
+                    : 'No cards saved yet. Add your cards below, or browse the full catalog until you finish setup.'}
+              </p>
+            </div>
+            <div className="mode-toggle" role="tablist" aria-label="Recommendation mode">
+              <button
+                className={effectiveRecommendationMode === 'wallet' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
+                type="button"
+                onClick={() => setRecommendationMode('wallet')}
+                disabled={!canUseWalletMode}
+              >
+                My Wallet
+              </button>
+              <button
+                className={effectiveRecommendationMode === 'catalog' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
+                type="button"
+                onClick={() => setRecommendationMode('catalog')}
+              >
+                Full Catalog
+              </button>
+            </div>
+            {walletCards.length > 0 ? (
+              <div className="wallet-chip-row">
+                {walletCards.map((card) => (
+                  <span key={card.id} className="wallet-chip">{card.card_name}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {requiresWalletSetup ? (
+          <div className="wallet-onboarding">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">New user setup</p>
+                <h3>Add your cards</h3>
+              </div>
+              <p className="section-note">Pick the cards you already have. We’ll use that wallet for personalized recommendations, but you can still browse the full catalog while you decide.</p>
+            </div>
+            <div className="onboarding-toolbar">
+              <label className="field">
+                <span>Search cards</span>
+                <input
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  type="text"
+                  placeholder="Search issuer, card, or network"
+                />
+              </label>
+              <label className="field">
+                <span>Issuer</span>
+                <select value={issuerFilter} onChange={(e) => setIssuerFilter(e.target.value)}>
+                  {issuerOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="ghost-button onboarding-skip" type="button" onClick={() => setRecommendationMode('catalog')}>
+                Skip for now and browse all cards
+              </button>
+            </div>
+            {Object.keys(groupedCatalogCards).length > 0 ? (
+              <div className="issuer-groups">
+                {Object.entries(groupedCatalogCards).map(([issuer, cards]) => (
+                  <section key={issuer} className="issuer-group">
+                    <div className="issuer-group-header">
+                      <h4>{issuer}</h4>
+                      <span>{cards.length} option{cards.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div className="catalog-grid">
+                      {cards.map((card) => (
+                        <article key={card.id} className="catalog-card">
+                          <div>
+                            <h4>{card.name}</h4>
+                            <p>{card.network} · Annual fee ${card.annual_fee} · FX fee {card.fx_fee_bps} bps</p>
+                          </div>
+                          <button
+                            className="primary-button catalog-button"
+                            type="button"
+                            onClick={() => handleAddCard(card)}
+                            disabled={walletSavingCardId === card.id}
+                          >
+                            {walletSavingCardId === card.id ? 'Adding...' : 'Add to Wallet'}
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="empty">No cards match the current search and issuer filter.</p>
+            )}
+          </div>
+        ) : null}
         <form className="form" onSubmit={onSubmit}>
           <label className="field">
             <span>Amount</span>
@@ -355,10 +655,11 @@ function App() {
               ))}
             </select>
           </label>
-          <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? 'Ranking cards...' : 'Recommend Best Card'}
+          <button className="primary-button" type="submit" disabled={loading || requiresWalletSetup}>
+            {loading ? 'Ranking cards...' : requiresWalletSetup ? 'Add Cards to Continue' : 'Recommend Best Card'}
           </button>
         </form>
+        {requiresWalletSetup ? <p className="warning">You are in wallet mode. Add a card above, or switch to Full Catalog to explore without saving cards yet.</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </section>
 
@@ -418,7 +719,19 @@ function App() {
                 <h3>Top 3</h3>
                 <div className="rank-list">
                   {result.top_3.map((card, index) => (
-                    <article key={card.card_id} className="item">
+                    <article
+                      key={card.card_id}
+                      className={selectedCardId === card.card_id ? 'item item-selected' : 'item'}
+                      onClick={() => handleCardSelection(card, index + 1)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          handleCardSelection(card, index + 1)
+                        }
+                      }}
+                    >
                       <div className="item-head">
                         <span className="rank-pill">#{index + 1}</span>
                         <div>
@@ -431,6 +744,7 @@ function App() {
                         <span>Score {card.score.toFixed(1)}/10</span>
                         <span>Rule {card.applied_rule_ids[0] ?? 'N/A'}</span>
                       </div>
+                      <p className="item-hint">Click to mark this as the card you would choose.</p>
                       {card.warnings.length > 0 ? (
                         <ul className="warning-list">
                           {card.warnings.map((warning, warningIndex) => (

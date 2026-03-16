@@ -10,12 +10,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.auth import router as auth_router
+from api.cards import router as cards_router
+from api.events import router as events_router
 from api.recommendations import router as recommendations_router
 from api.users import router as users_router
 from api.usage import router as usage_router
 from data.database import Base
 from data.session import get_db
 from models.cards import Card
+from models.recommendation_events import RecommendationEvent
 from models.reward_rules import RewardRule
 from models.user_cards import UserCard
 from models.users import User
@@ -54,6 +57,8 @@ def test_sessionmaker():
 def client(test_sessionmaker):
     app = FastAPI()
     app.include_router(auth_router)
+    app.include_router(cards_router)
+    app.include_router(events_router)
     app.include_router(recommendations_router)
     app.include_router(users_router)
     app.include_router(usage_router)

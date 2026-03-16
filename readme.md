@@ -15,7 +15,8 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 - Uses Postgres-backed `cards` and `reward_rules` data instead of hardcoded card logic
 - Returns explainable results with estimated dollar savings, a 10-point card score, `applied_rule_ids`, and warnings
 - Supports authenticated and guest access with Firebase Auth
-- Keeps the backend ready for wallet and usage features as those are reintroduced
+- Supports wallet-based recommendations for signed-in users, plus full-catalog browsing for guests or first-time users
+- Captures recommendation impressions and card selections for future model and product analysis
 
 ## Current Features
 
@@ -26,6 +27,9 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 - Explainable recommendation output
 - Estimated savings in dollars plus a normalized 10-point score
 - Google sign-in, email/password auth, and guest mode
+- New-user wallet onboarding with card search, issuer grouping, and add-to-wallet flow
+- Recommendation mode toggle between `My Wallet` and `Full Catalog`
+- Recommendation analytics events for impressions and selections
 - React + Vite frontend deployed on Firebase Hosting
 - Backend deployed on Cloud Run
 - CORS configured for local dev and hosted frontend origins
@@ -46,6 +50,7 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 │ Firebase Hosting                     │
 │ React + Vite frontend                │
 │ - sign-in UI                         │
+│ - wallet onboarding                  │
 │ - recommend form                     │
 │ - result dashboard                   │
 └───────┬───────────────────────┬──────┘
@@ -57,14 +62,18 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 │ Google, email,    │     │ Routes                                  │
 │ and anonymous     │     │ - GET /health                           │
 │ issues ID token   │     │ - GET /auth/me                          │
-└─────────┬─────────┘     │ - POST /recommend                       │
-          │ ID token      │ - POST /usage/log                       │
+└─────────┬─────────┘     │ - GET /cards                            │
+          │ ID token      │ - GET /users/me/cards                   │
           └──────────────>│ - POST /users/me/cards                  │
+                          │ - POST /events/recommendation           │
+                          │ - POST /recommend                       │
+                          │ - POST /usage/log                       │
                           ├──────────────────────────────────────────┤
                           │ Backend modules                         │
                           │ - CORS + request handling               │
                           │ - Firebase token verification           │
                           │ - recommendation service                │
+                          │ - event logging                         │
                           │ - SQLAlchemy ORM                        │
                           └──────────────────┬───────────────────────┘
                                              │ SQL
@@ -76,6 +85,7 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
                           │ - reward_rules                           │
                           │ - user_cards                             │
                           │ - spend_tracker                          │
+                          │ - recommendation_events                  │
                           └──────────────────────────────────────────┘
 ```
 
@@ -83,9 +93,10 @@ Request flow:
 
 - The browser loads the React app from Firebase Hosting.
 - Users authenticate with Firebase Auth and receive an ID token.
-- The frontend sends the ID token to FastAPI as a bearer token.
-- FastAPI verifies the token, maps it to an app user, and serves authenticated endpoints.
-- Recommendation requests read Cloud SQL through SQLAlchemy.
+- The frontend sends the ID token to FastAPI as a bearer token when user-specific features are active.
+- FastAPI verifies the token, maps it to an app user, and serves wallet and analytics endpoints.
+- Recommendation requests can run in either full-catalog mode or wallet mode.
+- Recommendation and selection events are written to Cloud SQL for future analysis.
 
 Primary tables:
 
@@ -94,6 +105,7 @@ Primary tables:
 - `reward_rules`
 - `user_cards`
 - `spend_tracker`
+- `recommendation_events`
 
 ## Tech Stack
 
@@ -107,6 +119,10 @@ Primary tables:
 
 - `GET /health` returns a simple health check
 - `GET /auth/me` verifies a Firebase bearer token and returns the current app user
+- `GET /cards` returns the active card catalog used by wallet onboarding
+- `GET /users/me/cards` returns the signed-in user wallet
+- `POST /users/me/cards` adds a card to the signed-in user wallet
+- `POST /events/recommendation` logs recommendation impressions and card selections
 - `POST /recommend` returns `best_card`, `top_3`, `explanations`, and applied rule metadata
 
 Recommendation responses include:
@@ -115,6 +131,7 @@ Recommendation responses include:
 - `score` as a normalized score out of `10`
 - `applied_rule_ids`
 - `warnings`
+- optional `recommendation_mode` in the request body: `catalog` or `wallet`
 
 ## Local Development
 
@@ -235,6 +252,9 @@ Implemented:
 
 - data-driven recommendation engine
 - explainable recommendation output
+- guest, full-catalog, and wallet-based recommendation journeys
+- new-user wallet onboarding and saved-card setup
+- recommendation impression and selection logging
 - Dockerized local stack
 - Cloud Run + Cloud SQL production backend
 - Firebase Hosting production frontend
@@ -243,7 +263,7 @@ Implemented:
 Next likely areas:
 
 - reintroduce cap tracking and usage logging once real user data exists
-- surface authenticated wallet management in the product UI
+- add richer wallet management such as remove/edit cards and starter wallet imports
 - stronger integration testing against Postgres
 - API gateway, analytics, and ops hardening
 
