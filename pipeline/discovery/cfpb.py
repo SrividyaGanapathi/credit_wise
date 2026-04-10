@@ -23,8 +23,8 @@ From this we extract:
     name    = cleaned filename (e.g. "American Express Gold Card")
     source_id = CFPB agreement ID embedded in filename suffix (e.g. "255468")
 
-terms_pdf_url is left NULL here — Layer 1 will download the ZIP and extract
-individual PDFs. The ZIP URL + in-zip path are stored in raw_data.
+terms_pdf_url is left NULL here — pdf_pipeline.py handles downloading and
+storing individual PDFs. The ZIP URL + in-zip path are stored in raw_data.
 """
 
 import logging
