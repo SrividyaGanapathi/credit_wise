@@ -193,6 +193,20 @@ def test_add_card_to_authenticated_user(client, seeded_data, auth_headers):
     assert body["nickname"] == "Dining Favorite"
 
 
+def test_remove_card_from_authenticated_user(client, auth_headers, seeded_data):
+    before = client.get("/users/me/cards", headers=auth_headers)
+    assert before.status_code == 200
+    wallet_before = before.json()
+    assert len(wallet_before) == 1
+
+    response = client.delete(f"/users/me/cards/{wallet_before[0]['id']}", headers=auth_headers)
+
+    assert response.status_code == 204
+    after = client.get("/users/me/cards", headers=auth_headers)
+    assert after.status_code == 200
+    assert after.json() == []
+
+
 def test_usage_log_creates_and_accumulates_spend(client, seeded_data, auth_headers):
     payload = {
         "rule_id": seeded_data["base_dining_rule_id"],

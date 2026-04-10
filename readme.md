@@ -18,7 +18,7 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 - Supports wallet-based recommendations for signed-in users, plus full-catalog browsing for guests or first-time users
 - Captures recommendation impressions and card selections for future model and product analysis
 
-## Current Features
+## Product Experience
 
 - FastAPI backend with SQLAlchemy and Alembic
 - PostgreSQL locally via Docker Compose and in production via Cloud SQL
@@ -34,6 +34,13 @@ To learn how the recommender model works, see [docs/recommender.md](/Users/sri/D
 - Backend deployed on Cloud Run
 - CORS configured for local dev and hosted frontend origins
 - GitHub Actions CI for backend tests and frontend build
+
+Typical flows:
+
+- Guest users can explore recommendations immediately from the full card catalog
+- Signed-in users can build a wallet, save multiple cards, remove cards, and switch between `My Wallet` and `Full Catalog`
+- New users are guided through wallet setup with search and issuer-grouped card selection
+- Every recommendation returns the top 3 options plus explanations for why each card ranked where it did
 
 ## Architecture
 
@@ -246,26 +253,14 @@ export VITE_API_BASE_URL=https://YOUR_CLOUD_RUN_URL
 
 Then deploy with Firebase Hosting.
 
-## Project Status
-
-Implemented:
-
-- data-driven recommendation engine
-- explainable recommendation output
-- guest, full-catalog, and wallet-based recommendation journeys
-- new-user wallet onboarding and saved-card setup
-- recommendation impression and selection logging
-- Dockerized local stack
-- Cloud Run + Cloud SQL production backend
-- Firebase Hosting production frontend
-- Firebase Auth-backed user flows, including guest mode
-
-Next likely areas:
+## Future Improvements
 
 - reintroduce cap tracking and usage logging once real user data exists
-- add richer wallet management such as remove/edit cards and starter wallet imports
-- stronger integration testing against Postgres
-- API gateway, analytics, and ops hardening
+- expand wallet management with edit/nickname flows and starter wallet imports
+- improve reward valuation beyond the current global points-to-dollars conversion
+- add user-facing rule and source citations once the explainability layer includes richer source references or retrieval-backed context
+- strengthen Postgres-backed integration testing and analytics workflows
+- add API gateway, observability, and operational hardening as usage grows
 
 ## Additional Docs
 

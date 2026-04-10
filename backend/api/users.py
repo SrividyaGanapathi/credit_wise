@@ -81,3 +81,21 @@ def add_card_to_user(
         "nickname": user_card.nickname,
         "is_active": user_card.is_active,
     }
+
+
+@router.delete("/me/cards/{user_card_id}", status_code=204)
+def remove_card_from_user(
+    user_card_id: int,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    user_card = (
+        db.query(UserCard)
+        .filter(UserCard.id == user_card_id, UserCard.user_id == current_user.id)
+        .one_or_none()
+    )
+    if user_card is None:
+        raise HTTPException(status_code=404, detail=f"User card {user_card_id} not found")
+
+    db.delete(user_card)
+    db.commit()

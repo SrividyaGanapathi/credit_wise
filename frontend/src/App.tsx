@@ -96,9 +96,13 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [walletLoading, setWalletLoading] = useState(false)
   const [walletSavingCardId, setWalletSavingCardId] = useState<number | null>(null)
+  const [walletRemovingCardId, setWalletRemovingCardId] = useState<number | null>(null)
+  const [stagedCardIds, setStagedCardIds] = useState<number[]>([])
   const [catalogSearch, setCatalogSearch] = useState('')
   const [issuerFilter, setIssuerFilter] = useState('All issuers')
   const [recommendationMode, setRecommendationMode] = useState<RecommendationMode>('catalog')
+  const [walletEditorOpen, setWalletEditorOpen] = useState(false)
+  const [walletCardsExpanded, setWalletCardsExpanded] = useState(false)
   const [authError, setAuthError] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<RecommendResponse | null>(null)
@@ -120,6 +124,9 @@ function App() {
         setBackendUser(null)
         setWalletCards([])
         setCatalogCards([])
+        setStagedCardIds([])
+        setWalletEditorOpen(false)
+        setWalletCardsExpanded(false)
         setRecommendationMode('catalog')
         setAuthLoading(false)
         return
@@ -155,6 +162,7 @@ function App() {
           }
         } else {
           setWalletCards([])
+          setWalletCardsExpanded(false)
           setRecommendationMode('catalog')
         }
       } catch (e) {
@@ -282,30 +290,81 @@ function App() {
     setWalletCards(walletData)
   }
 
-  async function handleAddCard(card: CardCatalogItem) {
+  function toggleStagedCard(cardId: number) {
+    setStagedCardIds((current) => (
+      current.includes(cardId)
+        ? current.filter((id) => id !== cardId)
+        : [...current, cardId]
+    ))
+  }
+
+  async function handleSaveSelectedCards() {
+    if (stagedCardIds.length === 0) {
+      return
+    }
+
     setAuthError('')
-    setWalletSavingCardId(card.id)
+    setWalletSavingCardId(-1)
     try {
       const authHeaders = await buildAuthHeaders()
-      const response = await fetch(`${API_BASE_URL}/users/me/cards`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({
-          card_id: card.id,
-          nickname: card.name,
-          is_active: true,
+      await Promise.all(
+        stagedCardIds.map(async (cardId) => {
+          const card = catalogCards.find((catalogCard) => catalogCard.id === cardId)
+          if (!card) {
+            return
+          }
+
+          const response = await fetch(`${API_BASE_URL}/users/me/cards`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({
+              card_id: card.id,
+              nickname: card.name,
+              is_active: true,
+            }),
+          })
+
+          if (!response.ok) {
+            throw new Error(`Add card failed with ${response.status}`)
+          }
         }),
+      )
+
+      await refreshWallet()
+      setStagedCardIds([])
+      setWalletEditorOpen(false)
+      setWalletCardsExpanded(true)
+      setRecommendationMode('wallet')
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : 'Unable to save wallet cards')
+    } finally {
+      setWalletSavingCardId(null)
+    }
+  }
+
+  async function handleRemoveCard(walletCard: WalletCard) {
+    setAuthError('')
+    setWalletRemovingCardId(walletCard.id)
+    try {
+      const authHeaders = await buildAuthHeaders()
+      const response = await fetch(`${API_BASE_URL}/users/me/cards/${walletCard.id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
       })
 
       if (!response.ok) {
-        throw new Error(`Add card failed with ${response.status}`)
+        throw new Error(`Remove card failed with ${response.status}`)
       }
 
       await refreshWallet()
+      if (walletCards.length === 1) {
+        setRecommendationMode('catalog')
+        setWalletCardsExpanded(false)
+      }
     } catch (e) {
-      setAuthError(e instanceof Error ? e.message : 'Unable to add card')
+      setAuthError(e instanceof Error ? e.message : 'Unable to remove card')
     } finally {
-      setWalletSavingCardId(null)
+      setWalletRemovingCardId(null)
     }
   }
 
@@ -382,6 +441,7 @@ function App() {
   const canUseWalletMode = Boolean(authUser && !authUser.isAnonymous && backendUser && walletCards.length > 0)
   const effectiveRecommendationMode: RecommendationMode = canUseWalletMode && recommendationMode === 'wallet' ? 'wallet' : 'catalog'
   const requiresWalletSetup = Boolean(authUser && !authUser.isAnonymous && backendUser && walletCards.length === 0 && recommendationMode === 'wallet')
+  const showWalletEditor = Boolean(authUser && !authUser.isAnonymous && (requiresWalletSetup || walletEditorOpen))
   const availableCatalogCards = catalogCards.filter((card) => !walletCards.some((walletCard) => walletCard.card_id === card.id))
   const normalizedSearch = catalogSearch.trim().toLowerCase()
   const issuerOptions = ['All issuers', ...new Set(availableCatalogCards.map((card) => card.issuer))]
@@ -440,20 +500,20 @@ function App() {
             </>
           ) : authUser ? (
             <>
-              <p className="auth-kicker">Wallet session</p>
+              <p className="auth-kicker">Account</p>
               <div className="identity-block">
-                <p className="identity-email">{authUser.isAnonymous ? 'Guest session' : authUser.email}</p>
+                <p className="identity-email">{authUser.isAnonymous ? 'Guest mode' : authUser.email}</p>
                 <div className="identity-meta">
                   <span className="status-badge success">
-                    {authUser.isAnonymous ? 'Anonymous access' : authUser.providerData[0]?.providerId === 'password' ? 'Email account' : 'Google connected'}
+                    {authUser.isAnonymous ? 'Guest access' : authUser.providerData[0]?.providerId === 'password' ? 'Email account' : 'Google account'}
                   </span>
-                  {backendUser ? <span className="status-badge">Backend user #{backendUser.id}</span> : null}
+                  {!authUser.isAnonymous ? <span className="status-badge">Saved wallet available</span> : null}
                 </div>
               </div>
               <p className="auth-copy">
                 {authUser.isAnonymous
-                  ? 'You can explore the recommender in guest mode and link to email or Google later if you want a persistent account.'
-                  : 'Signed-in sessions keep a persistent wallet. You can recommend from your saved cards or switch to the full catalog anytime.'}
+                  ? 'Explore recommendations without saving cards. You can switch to Google or email later if you want a persistent wallet.'
+                  : 'Use your saved cards for wallet-based recommendations, or switch to the full catalog anytime.'}
               </p>
               <button className="ghost-button" type="button" onClick={handleSignOut}>Sign Out</button>
             </>
@@ -534,41 +594,76 @@ function App() {
                     : 'No cards saved yet. Add your cards below, or browse the full catalog until you finish setup.'}
               </p>
             </div>
-            <div className="mode-toggle" role="tablist" aria-label="Recommendation mode">
-              <button
-                className={effectiveRecommendationMode === 'wallet' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
-                type="button"
-                onClick={() => setRecommendationMode('wallet')}
-                disabled={!canUseWalletMode}
-              >
-                My Wallet
-              </button>
-              <button
-                className={effectiveRecommendationMode === 'catalog' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
-                type="button"
-                onClick={() => setRecommendationMode('catalog')}
-              >
-                Full Catalog
-              </button>
+            <div className="wallet-toolbar">
+              <div className="mode-toggle" role="tablist" aria-label="Recommendation mode">
+                <button
+                  className={effectiveRecommendationMode === 'wallet' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
+                  type="button"
+                  onClick={() => setRecommendationMode('wallet')}
+                  disabled={!canUseWalletMode}
+                >
+                  My Wallet
+                </button>
+                <button
+                  className={effectiveRecommendationMode === 'catalog' ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
+                  type="button"
+                  onClick={() => setRecommendationMode('catalog')}
+                >
+                  Full Catalog
+                </button>
+                <button
+                  className={showWalletEditor ? 'mode-chip mode-chip-light active' : 'mode-chip mode-chip-light'}
+                  type="button"
+                  onClick={() => setWalletEditorOpen((current) => !current)}
+                >
+                  {showWalletEditor ? 'Close Card Picker' : 'Add Cards'}
+                </button>
+              </div>
+              {walletCards.length > 0 ? (
+                <button
+                  className="wallet-toggle"
+                  type="button"
+                  onClick={() => setWalletCardsExpanded((current) => !current)}
+                >
+                  {walletCardsExpanded ? 'Hide Your Cards' : `See Your Cards (${walletCards.length})`}
+                </button>
+              ) : null}
             </div>
-            {walletCards.length > 0 ? (
-              <div className="wallet-chip-row">
-                {walletCards.map((card) => (
-                  <span key={card.id} className="wallet-chip">{card.card_name}</span>
-                ))}
+            {walletCards.length > 0 && walletCardsExpanded ? (
+              <div className="wallet-dropdown">
+                <div className="wallet-chip-row">
+                  {walletCards.map((card) => (
+                    <span key={card.id} className="wallet-chip wallet-chip-action">
+                      <span>{card.card_name}</span>
+                      <button
+                        className="wallet-chip-remove"
+                        type="button"
+                        onClick={() => handleRemoveCard(card)}
+                        disabled={walletRemovingCardId === card.id}
+                        aria-label={`Remove ${card.card_name} from wallet`}
+                      >
+                        {walletRemovingCardId === card.id ? '...' : 'Remove'}
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </div>
             ) : null}
           </div>
         ) : null}
 
-        {requiresWalletSetup ? (
+        {showWalletEditor ? (
           <div className="wallet-onboarding">
             <div className="section-heading">
               <div>
-                <p className="section-kicker">New user setup</p>
-                <h3>Add your cards</h3>
+                <p className="section-kicker">{requiresWalletSetup ? 'New user setup' : 'Wallet editor'}</p>
+                <h3>{requiresWalletSetup ? 'Add your cards' : 'Add more cards'}</h3>
               </div>
-              <p className="section-note">Pick the cards you already have. We’ll use that wallet for personalized recommendations, but you can still browse the full catalog while you decide.</p>
+              <p className="section-note">
+                {requiresWalletSetup
+                  ? 'Pick a few cards you already have, then save them together. We’ll switch you into wallet mode once the selection is saved.'
+                  : 'Select any additional cards you have and save them together to update your wallet.'}
+              </p>
             </div>
             <div className="onboarding-toolbar">
               <label className="field">
@@ -589,8 +684,37 @@ function App() {
                 </select>
               </label>
               <button className="ghost-button onboarding-skip" type="button" onClick={() => setRecommendationMode('catalog')}>
-                Skip for now and browse all cards
+                {requiresWalletSetup ? 'Skip for now and browse all cards' : 'Use full catalog instead'}
               </button>
+            </div>
+            <div className="selection-summary">
+              <p className="wallet-copy">
+                {stagedCardIds.length === 0
+                  ? 'Select one or more cards to stage them before saving.'
+                  : `${stagedCardIds.length} card${stagedCardIds.length === 1 ? '' : 's'} selected to add to your wallet.`}
+              </p>
+              <div className="selection-actions">
+                {!requiresWalletSetup ? (
+                  <button
+                    className="ghost-button onboarding-cancel"
+                    type="button"
+                    onClick={() => {
+                      setWalletEditorOpen(false)
+                      setStagedCardIds([])
+                    }}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+                <button
+                  className="primary-button selection-submit"
+                  type="button"
+                  onClick={handleSaveSelectedCards}
+                  disabled={stagedCardIds.length === 0 || walletSavingCardId !== null}
+                >
+                  {walletSavingCardId !== null ? 'Saving cards...' : `Save ${stagedCardIds.length || ''} Selected Card${stagedCardIds.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
             </div>
             {Object.keys(groupedCatalogCards).length > 0 ? (
               <div className="issuer-groups">
@@ -608,12 +732,12 @@ function App() {
                             <p>{card.network} · Annual fee ${card.annual_fee} · FX fee {card.fx_fee_bps} bps</p>
                           </div>
                           <button
-                            className="primary-button catalog-button"
+                            className={stagedCardIds.includes(card.id) ? 'primary-button catalog-button is-selected' : 'primary-button catalog-button'}
                             type="button"
-                            onClick={() => handleAddCard(card)}
-                            disabled={walletSavingCardId === card.id}
+                            onClick={() => toggleStagedCard(card.id)}
+                            disabled={walletSavingCardId !== null}
                           >
-                            {walletSavingCardId === card.id ? 'Adding...' : 'Add to Wallet'}
+                            {stagedCardIds.includes(card.id) ? 'Selected' : 'Select'}
                           </button>
                         </article>
                       ))}
@@ -687,9 +811,6 @@ function App() {
                       <p className="result-label">Best match</p>
                       <h3>{result.best_card.card_name}</h3>
                     </div>
-                    <span className="status-badge highlight brand-chip">
-                      Rule {result.best_card.applied_rule_ids[0] ?? 'N/A'}
-                    </span>
                   </div>
                   <div className="stat-row">
                     <div className="stat-card">
@@ -742,9 +863,8 @@ function App() {
                       <div className="item-stats">
                         <span>Saves {formatDollars(card.net_value)}</span>
                         <span>Score {card.score.toFixed(1)}/10</span>
-                        <span>Rule {card.applied_rule_ids[0] ?? 'N/A'}</span>
                       </div>
-                      <p className="item-hint">Click to mark this as the card you would choose.</p>
+                      <p className="item-hint">Optional: click if this is the card you would actually use.</p>
                       {card.warnings.length > 0 ? (
                         <ul className="warning-list">
                           {card.warnings.map((warning, warningIndex) => (
@@ -755,14 +875,6 @@ function App() {
                     </article>
                   ))}
                 </div>
-              </div>
-              <div className="explanations">
-                <h3>Decision Notes</h3>
-                <ul>
-                  {result.explanations.map((line, index) => (
-                    <li key={index}>{line}</li>
-                  ))}
-                </ul>
               </div>
             </div>
           </>

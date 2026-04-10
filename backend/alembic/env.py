@@ -11,6 +11,7 @@ from models.cards import Card
 from models.reward_rules import RewardRule
 from models.spend_tracker import SpendTracker
 from models.user_cards import UserCard
+from models.card_registry import CardRegistry
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

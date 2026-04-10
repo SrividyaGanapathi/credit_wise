@@ -131,6 +131,12 @@ So:
 - `net_value` answers: “How much value do I save?”
 - `score` answers: “How strong is this card relative to the best option right now?”
 
+In most normal responses, the top-ranked card receives `10.0/10` because the score is normalized against the best ranking value in that result set.
+
+One exception:
+
+- if the best ranking value is non-positive, the service falls back to `0.0` instead of forcing a misleading `10.0`
+
 ## Ranking Logic
 
 For each card, the engine keeps only the single best matching rule candidate.
